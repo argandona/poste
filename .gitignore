@@ -1,0 +1,21 @@
+# Python / Django
+__pycache__/
+*.py[cod]
+*.sqlite3
+db.sqlite3
+
+# Entorno virtual
+venv/
+.venv/
+
+# Variables de entorno (NO subir)
+.env
+
+# Estáticos y media generados
+staticfiles/
+media/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
