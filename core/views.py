@@ -20,6 +20,13 @@ INCLUSIONES_CONSOLIDADO = {
         'incluidos': {
             '*091608': 2, '*091320': 1, '*091316': 1, '*091322': 1,
             '*091346': 1, '*091357': 1, '*091356': 1,
+            '*090633': 100,   # el cambio de poste ya incluye 100 de acarreo
+        },
+        # Derivación: el excedente de acarreo se cobra como traslado manual.
+        # origen (*090633) ÷ divisor; si supera umbral*N, el sobrante va a destino.
+        'derivar': {
+            'origen': '*090633', 'destino': '*090634',
+            'divisor': Decimal('6'), 'umbral': 100,
         },
     },
 }
@@ -1370,6 +1377,7 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
 
         # 2) Descuento POR POSTE, agregado por SST.
         ssts = {}
+        _mo_cache = {}
         for (sst_cod, _sum), g in postes.items():
             regla = INCLUSIONES_CONSOLIDADO.get(_norm_txt(g['act']))
             num = Decimal('0')
@@ -1392,6 +1400,27 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
                 pe['real'] += real
                 pe['incl'] += incl
                 pe['cobra'] += cobra
+
+            # Derivación: excedente de acarreo (*090633 ÷ 6) → traslado manual (*090634).
+            deriv = regla.get('derivar') if regla else None
+            if deriv and deriv['origen'] in g['partidas']:
+                metrado = g['partidas'][deriv['origen']]['cantidad']
+                q = metrado / deriv['divisor']
+                umbral = num * Decimal(deriv['umbral']) if num > 0 else Decimal('0')
+                cobra_d = q - umbral
+                if cobra_d < 0:
+                    cobra_d = Decimal('0')
+                if deriv['destino'] not in _mo_cache:
+                    _mo_cache[deriv['destino']] = ManoDeObra.objects.filter(
+                        partida=deriv['destino']).first()
+                mo_d = _mo_cache[deriv['destino']]
+                if mo_d is not None:
+                    pe = agg['partidas'].setdefault(deriv['destino'],
+                        {'mo': mo_d, 'real': Decimal('0'), 'incl': Decimal('0'),
+                         'cobra': Decimal('0')})
+                    pe['real'] += q
+                    pe['incl'] += umbral
+                    pe['cobra'] += cobra_d
 
         # 3) Salida por SST.
         resultado = []
