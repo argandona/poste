@@ -129,7 +129,12 @@ class Command(BaseCommand):
 
         crear_tipo("poste", POSTE_MO, POSTE_MAT)
         crear_tipo("alumbrado", ALUMBRADO_MO, ALUMBRADO_MAT)
-        self.stdout.write("Actividad y tipos de trabajo (poste, alumbrado) listos.")
+
+        # Tipo "Otros": solo mano de obra *010213 con descripción específica.
+        ManoDeObra.objects.filter(partida="*010213").update(
+            descripcion="Traslado de cables de comunicacion")
+        crear_tipo("Otros", ["*010213"], [])
+        self.stdout.write("Tipos de trabajo (poste, alumbrado, Otros) listos.")
 
         # ── SST + suministros asignados al capataz (para liquidar) ──
         for i in range(1, 3):
