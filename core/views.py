@@ -17,10 +17,14 @@ def _norm_txt(s):
 INCLUSIONES_CONSOLIDADO = {
     'cambio de poste inaccesible subterraneo': {
         'paquete': ['*090470', '*090471'],
+        # Valor entero -> se multiplica por N (total de cambios de poste).
+        # Dict {'segun': partida, 'cantidad': v} -> se multiplica por la cantidad
+        # de esa partida específica del paquete (ej. solo *090470 con vereda).
         'incluidos': {
             '*091608': 2, '*091320': 1, '*091316': 1, '*091322': 1,
             '*091346': 1, '*091357': 1, '*091356': 1,
             '*090633': 100,   # el cambio de poste ya incluye 100 de acarreo
+            '*091840': {'segun': '*090470', 'cantidad': 2},  # 2 incluidos por cambio CON vereda
         },
         # Derivación: el excedente de acarreo se cobra como traslado manual.
         # origen (*090633) ÷ divisor; si supera umbral*N, el sobrante va a destino.
@@ -1391,7 +1395,14 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
             agg['cambios'] += num
             for pc, info in g['partidas'].items():
                 real = info['cantidad']
-                incl = num * Decimal(regla['incluidos'].get(pc, 0)) if (regla and num > 0) else Decimal('0')
+                incl = Decimal('0')
+                cfg = regla['incluidos'].get(pc) if regla else None
+                if cfg is not None:
+                    if isinstance(cfg, dict):
+                        base = g['partidas'].get(cfg['segun'], {}).get('cantidad', Decimal('0'))
+                        incl = base * Decimal(cfg['cantidad'])
+                    else:
+                        incl = num * Decimal(cfg)
                 cobra = real - incl
                 if cobra < 0:
                     cobra = Decimal('0')
