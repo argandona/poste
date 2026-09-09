@@ -121,6 +121,8 @@ class Command(BaseCommand):
 
         def crear_tipo(nombre, partidas, matriculas, actividades):
             tt, _ = TipoTrabajo.objects.update_or_create(nombre=nombre)
+            # Reseteamos los vínculos de actividad para que el tipo quede EXACTO.
+            ActividadTipoTrabajo.objects.filter(tipo_trabajo=tt).delete()
             for act in actividades:
                 ActividadTipoTrabajo.objects.get_or_create(actividad=act, tipo_trabajo=tt)
             TipoTrabajoManoDeObra.objects.filter(tipo_trabajo=tt).delete()
@@ -135,12 +137,15 @@ class Command(BaseCommand):
                     TipoTrabajoMaterial.objects.get_or_create(tipo_trabajo=tt, material=mat)
             return tt
 
-        # poste, alumbrado y Otros pertenecen a AMBAS actividades.
-        ambas = [actividad, actividad_viento]
-        crear_tipo("poste", POSTE_MO, POSTE_MAT, ambas)
-        crear_tipo("alumbrado", ALUMBRADO_MO, ALUMBRADO_MAT, ambas)
-        crear_tipo("Otros", ["*010213"], [], ambas)
-        self.stdout.write("Actividades y tipos de trabajo (poste, alumbrado, Otros) listos.")
+        # Actividad normal: poste, alumbrado, Otros (con su MO/MT).
+        crear_tipo("poste", POSTE_MO, POSTE_MAT, [actividad])
+        crear_tipo("alumbrado", ALUMBRADO_MO, ALUMBRADO_MAT, [actividad])
+        crear_tipo("Otros", ["*010213"], [], [actividad])
+        # Actividad "-viento": tipos PROPIOS y VACÍOS (MO/MT se cargan aparte).
+        crear_tipo("Poste viento", [], [], [actividad_viento])
+        crear_tipo("Alumbrado viento", [], [], [actividad_viento])
+        crear_tipo("Otros viento", [], [], [actividad_viento])
+        self.stdout.write("Actividades y tipos de trabajo listos.")
 
         # Nota: las SST se asignan manualmente desde el módulo del Coordinador.
         self.stdout.write(self.style.SUCCESS("Entorno de prueba sembrado correctamente."))
