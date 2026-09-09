@@ -13,6 +13,7 @@ from .views import (
     SuministroViewSet, LiquidacionViewSet,
     PlanoSSTViewSet,
     ActividadViewSet, TipoTrabajoViewSet, ManoDeObraViewSet,
+    RecuperoViewSet,
 )
 
 router = DefaultRouter()
@@ -41,6 +42,7 @@ router.register(r'planos',               PlanoSSTViewSet,              basename=
 router.register(r'actividades',          ActividadViewSet,             basename='actividad')
 router.register(r'tipos-trabajo',        TipoTrabajoViewSet,           basename='tipo-trabajo')
 router.register(r'mano-de-obra',         ManoDeObraViewSet,            basename='mano-de-obra')
+router.register(r'recuperos',            RecuperoViewSet,              basename='recupero')
 
 urlpatterns = [
     path('auth/login/',   LoginView.as_view(),   name='login'),

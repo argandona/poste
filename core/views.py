@@ -1301,6 +1301,50 @@ class SuministroViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(ConsumoMaterialSuministroSerializer(qs, many=True).data)
 
 
+# ── Recupero ──────────────────────────────────────────────────────────────────
+class RecuperoViewSet(viewsets.ModelViewSet):
+    """Catálogo de recuperos + registro por suministro."""
+    serializer_class   = RecuperoSerializer
+    queryset           = Recupero.objects.all().order_by('matricula')
+    permission_classes = [permissions.IsAuthenticated]
+
+    @action(detail=False, methods=['get'])
+    def por_suministro(self, request):
+        """GET /api/recuperos/por_suministro/?suministro=<id> — recuperos ya
+        registrados de ese suministro (para precargar la pestaña)."""
+        suministro_id = request.query_params.get('suministro')
+        qs = SuministroRecupero.objects.select_related('recupero')
+        if suministro_id:
+            qs = qs.filter(suministro_id=suministro_id)
+        else:
+            qs = qs.none()
+        return Response(SuministroRecuperoSerializer(qs, many=True).data)
+
+    @action(detail=False, methods=['post'])
+    def registrar(self, request):
+        """POST /api/recuperos/registrar/ { suministro, fecha?, items:[{recupero,cantidad}] }
+        Reemplaza los recuperos del suministro por los enviados."""
+        import datetime as _dt
+        suministro_id = request.data.get('suministro')
+        items = request.data.get('items', [])
+        fecha = request.data.get('fecha') or str(_dt.date.today())
+        if not suministro_id:
+            return Response({'detail': 'suministro requerido.'}, status=400)
+        sum_obj = Suministro.objects.filter(pk=suministro_id).first()
+        if sum_obj is None:
+            return Response({'detail': 'Suministro no encontrado.'}, status=404)
+        with transaction.atomic():
+            SuministroRecupero.objects.filter(suministro=sum_obj).delete()
+            for it in items:
+                cant = it.get('cantidad')
+                rec = it.get('recupero')
+                if rec and cant and float(cant) > 0:
+                    SuministroRecupero.objects.create(
+                        suministro=sum_obj, recupero_id=rec, cantidad=cant, fecha=fecha)
+        n = SuministroRecupero.objects.filter(suministro=sum_obj).count()
+        return Response({'status': 'ok', 'recuperos': n})
+
+
 # ── Liquidacion Suministro ────────────────────────────────────────────────────
 class LiquidacionViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]

@@ -39,6 +39,7 @@ ROLES = {
 }
 
 ACTIVIDAD = "Cambio de poste inaccesible subterráneo"
+ACTIVIDAD_VIENTO = "Cambio de poste inaccesible subterráneo-viento"
 
 POSTE_MO = ['*094395', '*095266', '*091840', '*091842', '*094918', '*094913',
             '*094911', '*090471', '*090470', '*090633', '*090632', '*090630']
@@ -109,12 +110,18 @@ class Command(BaseCommand):
             StockCamion.objects.update_or_create(
                 camion=camion, material=m5031165, defaults={"cantidad": Decimal("500")})
 
-        # ── Actividad + tipos de trabajo ──
+        # ── Actividades + tipos de trabajo ──
         actividad, _ = Actividad.objects.update_or_create(nombre=ACTIVIDAD)
+        actividad_viento, _ = Actividad.objects.update_or_create(nombre=ACTIVIDAD_VIENTO)
 
-        def crear_tipo(nombre, partidas, matriculas):
+        # Renombre de *010213 para el tipo "Otros".
+        ManoDeObra.objects.filter(partida="*010213").update(
+            descripcion="Traslado de cables de comunicacion")
+
+        def crear_tipo(nombre, partidas, matriculas, actividades):
             tt, _ = TipoTrabajo.objects.update_or_create(nombre=nombre)
-            ActividadTipoTrabajo.objects.get_or_create(actividad=actividad, tipo_trabajo=tt)
+            for act in actividades:
+                ActividadTipoTrabajo.objects.get_or_create(actividad=act, tipo_trabajo=tt)
             TipoTrabajoManoDeObra.objects.filter(tipo_trabajo=tt).delete()
             for p in partidas:
                 mo = ManoDeObra.objects.filter(partida=p).first()
@@ -127,30 +134,12 @@ class Command(BaseCommand):
                     TipoTrabajoMaterial.objects.get_or_create(tipo_trabajo=tt, material=mat)
             return tt
 
-        crear_tipo("poste", POSTE_MO, POSTE_MAT)
-        crear_tipo("alumbrado", ALUMBRADO_MO, ALUMBRADO_MAT)
+        # poste, alumbrado y Otros pertenecen a AMBAS actividades.
+        ambas = [actividad, actividad_viento]
+        crear_tipo("poste", POSTE_MO, POSTE_MAT, ambas)
+        crear_tipo("alumbrado", ALUMBRADO_MO, ALUMBRADO_MAT, ambas)
+        crear_tipo("Otros", ["*010213"], [], ambas)
+        self.stdout.write("Actividades y tipos de trabajo (poste, alumbrado, Otros) listos.")
 
-        # Tipo "Otros": solo mano de obra *010213 con descripción específica.
-        ManoDeObra.objects.filter(partida="*010213").update(
-            descripcion="Traslado de cables de comunicacion")
-        crear_tipo("Otros", ["*010213"], [])
-        self.stdout.write("Tipos de trabajo (poste, alumbrado, Otros) listos.")
-
-        # ── SST + suministros asignados al capataz (para liquidar) ──
-        for i in range(1, 3):
-            sst, _ = SST.objects.update_or_create(
-                codigo=f"SST-2026-{i:03d}",
-                defaults=dict(sst=f"S{i:06d}", empresa=empresa, distrito="Miraflores",
-                              actividad=actividad, fecha_inicio=date.today(),
-                              monto_sst=Decimal("1500.00")))
-            SSTEncargado.objects.get_or_create(sst=sst, usuario=capataz)
-            for j in range(1, 3):
-                num = f"SUM-{i:02d}{j:03d}"
-                sm, _ = Suministro.objects.update_or_create(
-                    numero_suministro=num,
-                    defaults=dict(medidor=f"MED{i}{j:03d}", distrito="Miraflores",
-                                  monto_sum=Decimal("250.00"), estado="asignado"))
-                SSTSuministro.objects.update_or_create(
-                    sst=sst, suministro=sm, defaults=dict(asignado_a=capataz))
-
+        # Nota: las SST se asignan manualmente desde el módulo del Coordinador.
         self.stdout.write(self.style.SUCCESS("Entorno de prueba sembrado correctamente."))
