@@ -100,8 +100,9 @@ class Command(BaseCommand):
             UsuarioCamion(usuario=capataz, camion=camion,
                           fecha_inicio=date.today(), fecha_fin=date(2100, 1, 1)).save()
 
-        # ── Catálogos: mano de obra + materiales + stock ──
+        # ── Catálogos: mano de obra + materiales + recuperos + stock ──
         call_command("cargar_mano_de_obra")
+        call_command("cargar_recuperos")
         call_command("cargar_saldo_camion", placa="ABC-123")
 
         # Saldo especial pedido: cable 5031165 a 500
