@@ -1307,6 +1307,7 @@ class RecuperoViewSet(viewsets.ModelViewSet):
     serializer_class   = RecuperoSerializer
     queryset           = Recupero.objects.all().order_by('matricula')
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class   = CatalogoPagination  # devuelve el catálogo completo
 
     @action(detail=False, methods=['get'])
     def por_suministro(self, request):
