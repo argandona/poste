@@ -15,11 +15,20 @@ load_dotenv(BASE_DIR / ".env")
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-inseguro-cambiar-en-produccion")
 DEBUG = os.getenv("DEBUG", "True") == "True"
 
-# Hosts permitidos: en Render se agrega el dominio automático.
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
+# Hosts permitidos. El comodín solo se asume en desarrollo: con DEBUG=False y sin
+# ALLOWED_HOSTS configurado la lista queda vacía a propósito (falla cerrado) y el
+# único host válido es el que Render inyecta abajo.
+_allowed_hosts = os.getenv("ALLOWED_HOSTS", "").strip()
+if _allowed_hosts:
+    ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts.split(",") if h.strip()]
+else:
+    ALLOWED_HOSTS = ["*"] if DEBUG else []
+
+# En Render se agrega el dominio automático.
 _render_host = os.getenv("RENDER_EXTERNAL_HOSTNAME")
 if _render_host:
-    ALLOWED_HOSTS.append(_render_host)
+    if _render_host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(_render_host)
     CSRF_TRUSTED_ORIGINS = [f"https://{_render_host}"]
 
 INSTALLED_APPS = [
@@ -100,6 +109,17 @@ STORAGES = {
 }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# El bloqueo por intentos de login fallidos (core/security.py) vive en la caché.
+# Con el LocMemCache por defecto el contador es por proceso y se pierde en cada
+# reinicio — y en el plan free de Render el servicio se duerme por inactividad,
+# así que el bloqueo de 15 minutos se evaporaba. En base de datos persiste.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "cache_tecsur",
+    }
+}
 
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True

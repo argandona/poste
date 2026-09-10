@@ -34,12 +34,28 @@ INCLUSIONES_CONSOLIDADO = {
         },
     },
 }
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
+from rest_framework.exceptions import APIException
 from rest_framework.parsers import MultiPartParser
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
+
+
+class ErrorNegocio(APIException):
+    """Error de regla de negocio dentro de un bloque transaccional.
+
+    Devolver un `Response` desde dentro de un `transaction.atomic()` sale del
+    bloque sin excepción, así que la transacción COMMITEA lo hecho hasta ahí:
+    un pedido de varios materiales podía descontar los primeros y responder 400
+    por el último. Lanzar esta excepción aborta la transacción y responde 400
+    con la misma forma que antes (`{"detail": "<texto>"}`), que es lo que espera
+    la app Flutter en api_service.dart.
+    """
+    status_code = status.HTTP_400_BAD_REQUEST
+    default_detail = 'Operación inválida.'
 
 
 class CatalogoPagination(PageNumberPagination):
@@ -740,7 +756,7 @@ class PedidoViewSet(viewsets.ModelViewSet):
             # Aprobar
             almacen = data.get('almacen')
             if not almacen:
-                return Response({'detail': 'Se requiere almacen para aprobar.'}, status=400)
+                raise ErrorNegocio('Se requiere almacen para aprobar.')
 
             for det_data in data.get('detalles', []):
                 det = DetallePedido.objects.get(pedido=pedido, material=det_data['material'])
@@ -750,7 +766,9 @@ class PedidoViewSet(viewsets.ModelViewSet):
                     stock = StockAlmacen.objects.get(almacen=almacen, material=det.material)
                     stock.descontar(cant_aprobada)
                 except StockAlmacen.DoesNotExist:
-                    return Response({'detail': f'Sin stock de {det.material} en el almacén.'}, status=400)
+                    raise ErrorNegocio(f'Sin stock de {det.material} en el almacén.')
+                except DjangoValidationError as exc:
+                    raise ErrorNegocio(exc.messages[0])
                 # Subir stock camion
                 stock_camion, _ = StockCamion.objects.get_or_create(
                     camion=pedido.camion, material=det.material, defaults={'cantidad': 0}
@@ -846,7 +864,7 @@ class DevolucionViewSet(viewsets.ModelViewSet):
 
             almacen_destino = data.get('almacen_destino')
             if not almacen_destino:
-                return Response({'detail': 'Se requiere almacen_destino para aprobar.'}, status=400)
+                raise ErrorNegocio('Se requiere almacen_destino para aprobar.')
 
             for det_data in data.get('detalles', []):
                 det = DetalleDevolucion.objects.get(devolucion=devolucion, material=det_data['material'])
@@ -856,7 +874,9 @@ class DevolucionViewSet(viewsets.ModelViewSet):
                     stock_camion = StockCamion.objects.get(camion=devolucion.camion, material=det.material)
                     stock_camion.descontar(cant_aprobada)
                 except StockCamion.DoesNotExist:
-                    return Response({'detail': f'Sin stock de {det.material} en el camión.'}, status=400)
+                    raise ErrorNegocio(f'Sin stock de {det.material} en el camión.')
+                except DjangoValidationError as exc:
+                    raise ErrorNegocio(exc.messages[0])
                 # Subir al almacén
                 stock_alm, _ = StockAlmacen.objects.get_or_create(
                     almacen=almacen_destino, material=det.material, defaults={'cantidad': 0}
@@ -901,7 +921,9 @@ class UploadConsumoViewSet(viewsets.ModelViewSet):
                         stock = StockCamion.objects.get(camion=consumo.camion, material=det.material)
                         stock.descontar(det.cantidad)
                     except StockCamion.DoesNotExist:
-                        return Response({'detail': f'Sin stock de {det.material} en camión {consumo.camion}.'}, status=400)
+                        raise ErrorNegocio(f'Sin stock de {det.material} en camión {consumo.camion}.')
+                    except DjangoValidationError as exc:
+                        raise ErrorNegocio(exc.messages[0])
             upload.estado = 'aprobado'
             upload.save()
         return Response({'detail': 'Consumo aprobado y stock descontado.'})
@@ -978,7 +1000,7 @@ class UploadConsumoViewSet(viewsets.ModelViewSet):
             )
 
             if upload.estado == 'aprobado':
-                return Response({'detail': 'Este SST ya tiene un consumo aprobado.'}, status=400)
+                raise ErrorNegocio('Este SST ya tiene un consumo aprobado.')
 
             for num_fila, row in enumerate(rows[1:], start=2):
                 if not any(row):
