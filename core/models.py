@@ -54,7 +54,12 @@ class Usuario(models.Model):
     def puede_hacer_consumo(self): return self.rol_id in (Rol.LIQUIDADOR, Rol.ENCARGADO_ALMACEN)
     def puede_aprobar_pedido(self): return self.rol_id in (Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
     def puede_aprobar_devolucion(self): return self.rol_id in (Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
-    def puede_hacer_inventario(self): return self.rol_id in (Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
+    # Conteo fisico de existencias. En TECSUR el Capataz inventaria su propio
+    # camion (ver Inventario.clean), a diferencia de ENCOSSA.
+    def puede_hacer_inventario(self): return self.rol_id in (Rol.CAPATAZ, Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
+    # Movimientos del almacen: ingresos de proveedor, devoluciones a Tecsur,
+    # materiales malogrados y transferencias entre almacenes.
+    def puede_gestionar_almacen(self): return self.rol_id in (Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
     def puede_gestionar_empresa(self): return self.rol_id in (Rol.ADMIN_EMPRESA, Rol.SUPERADMIN)
     def puede_asignar_sst(self): return self.rol_id in (Rol.COORDINADOR, Rol.SUPERADMIN)
 
@@ -274,7 +279,7 @@ class IngresoTecsur(models.Model):
     class Meta:
         db_table = "ingreso_tecsur"
     def clean(self):
-        if self.usuario_id and not self.usuario.puede_hacer_inventario():
+        if self.usuario_id and not self.usuario.puede_gestionar_almacen():
             raise ValidationError("Solo el Encargado de Almacén puede registrar ingresos.")
     def __str__(self):
         return f"Ingreso {self.folio} | {self.almacen}"
@@ -301,7 +306,7 @@ class DevolucionTecsur(models.Model):
     class Meta:
         db_table = "devolucion_tecsur"
     def clean(self):
-        if self.usuario_id and not self.usuario.puede_hacer_inventario():
+        if self.usuario_id and not self.usuario.puede_gestionar_almacen():
             raise ValidationError("Solo el Encargado de Almacén puede registrar devoluciones a Tecsur.")
 
 
@@ -326,7 +331,7 @@ class MaterialMalogrado(models.Model):
     class Meta:
         db_table = "material_malogrado"
     def clean(self):
-        if self.usuario_id and not self.usuario.puede_hacer_inventario():
+        if self.usuario_id and not self.usuario.puede_gestionar_almacen():
             raise ValidationError("Solo el Encargado de Almacén puede registrar materiales malogrados.")
 
 
@@ -354,7 +359,7 @@ class TransferenciaAlmacen(models.Model):
     class Meta:
         db_table = "transferencia_almacen"
     def clean(self):
-        if self.usuario_id and not self.usuario.puede_hacer_inventario():
+        if self.usuario_id and not self.usuario.puede_gestionar_almacen():
             raise ValidationError("Solo el Encargado de Almacén puede realizar transferencias.")
         if self.almacen_origen_id == self.almacen_destino_id:
             raise ValidationError("El almacén origen y destino no pueden ser el mismo.")
@@ -504,9 +509,19 @@ class Inventario(models.Model):
         unique_together = [("camion","mes","anio"),("almacen","mes","anio")]
     def clean(self):
         if self.usuario_id and not self.usuario.puede_hacer_inventario():
-            raise ValidationError("Solo el Encargado de Almacén puede realizar inventarios.")
+            raise ValidationError("Este rol no puede realizar inventarios.")
         if self.camion_id and self.almacen_id: raise ValidationError("El inventario debe ser de un camión O un almacén, no ambos.")
         if not self.camion_id and not self.almacen_id: raise ValidationError("El inventario debe apuntar a un camión o un almacén.")
+        # El Capataz solo cuenta el camión que tiene asignado; el almacén es
+        # del Encargado de Almacén.
+        if self.usuario_id and self.usuario.rol_id == Rol.CAPATAZ:
+            if not self.camion_id:
+                raise ValidationError("El Capataz solo puede inventariar su camión, no el almacén.")
+            camion_asignado = UsuarioCamion.camion_activo_de_usuario(self.usuario, self.fecha or date.today())
+            if camion_asignado is None:
+                raise ValidationError("No tienes un camión asignado en este momento.")
+            if self.camion_id != camion_asignado.id_camion:
+                raise ValidationError("El camión no está asignado a este usuario.")
 
 
 class DetalleInventario(models.Model):
