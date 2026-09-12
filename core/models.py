@@ -1,9 +1,9 @@
 from decimal import Decimal
 
-from django.db import models
+from django.db import models, transaction
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
-from datetime import date
+from datetime import date, timedelta
 
 
 class Empresa(models.Model):
@@ -54,7 +54,12 @@ class Usuario(models.Model):
     def puede_hacer_consumo(self): return self.rol_id in (Rol.LIQUIDADOR, Rol.ENCARGADO_ALMACEN)
     def puede_aprobar_pedido(self): return self.rol_id in (Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
     def puede_aprobar_devolucion(self): return self.rol_id in (Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
-    def puede_hacer_inventario(self): return self.rol_id in (Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
+    # Conteo fisico de existencias. En TECSUR el Capataz inventaria su propio
+    # camion (ver Inventario.clean), a diferencia de ENCOSSA.
+    def puede_hacer_inventario(self): return self.rol_id in (Rol.CAPATAZ, Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
+    # Movimientos del almacen: ingresos de proveedor, devoluciones a Tecsur,
+    # materiales malogrados y transferencias entre almacenes.
+    def puede_gestionar_almacen(self): return self.rol_id in (Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
     def puede_gestionar_empresa(self): return self.rol_id in (Rol.ADMIN_EMPRESA, Rol.SUPERADMIN)
     def puede_asignar_sst(self): return self.rol_id in (Rol.COORDINADOR, Rol.SUPERADMIN)
 
@@ -92,20 +97,106 @@ class UsuarioCamion(models.Model):
         db_table = "usuario_camion"
     def __str__(self):
         return f"{self.usuario} → {self.camion}"
+
+    # ── Responsabilidad sobre el saldo del camión ────────────────────────────
+    # La asignación NO vence sola: nace abierta (`fecha_fin` nula) y solo se
+    # cierra con `liberar()` o `traspasar_a()`. Si caducara por calendario, un
+    # capataz podría pedir material, dejar pasar la fecha y quedarse sin saldos
+    # que devolver: el stock seguiría en el camión y ya no habría a quién
+    # reclamárselo.
+
+    # Lo activa `traspasar_a()` para poder cerrar con saldo, porque en un
+    # traspaso el material no queda huérfano: pasa al siguiente responsable.
+    _traspaso_en_curso = False
+
+    def saldo_camion(self):
+        """Cuánto material carga hoy el camión (suma de StockCamion)."""
+        total = StockCamion.objects.filter(camion=self.camion).aggregate(
+            t=models.Sum("cantidad"))["t"]
+        return total or Decimal("0")
+
+    def _esta_cerrando(self, original):
+        """True si el cambio le quita al usuario la responsabilidad del camión."""
+        if original.activo and not self.activo:
+            return True
+        if original.fecha_fin is None:
+            return self.fecha_fin is not None
+        return self.fecha_fin is not None and self.fecha_fin < original.fecha_fin
+
     def clean(self):
-        if not self.fecha_fin:
-            raise ValidationError("La fecha de fin es obligatoria.")
-        if self.fecha_fin < self.fecha_inicio:
+        if self.fecha_fin and self.fecha_fin < self.fecha_inicio:
             raise ValidationError("La fecha de fin no puede ser anterior a la de inicio.")
-        qs = UsuarioCamion.objects.filter(camion=self.camion, activo=True, fecha_inicio__lte=self.fecha_fin, fecha_fin__gte=self.fecha_inicio)
+        original = UsuarioCamion.objects.filter(pk=self.pk).first() if self.pk else None
+        if original is None and self.fecha_fin:
+            raise ValidationError("Una asignación nueva no lleva fecha de fin: se cierra al liberar o traspasar el camión.")
+        if (original is not None and not self._traspaso_en_curso
+                and self._esta_cerrando(original) and self.saldo_camion() > 0):
+            raise ValidationError(
+                f"El camión {self.camion} tiene saldo a nombre de {self.usuario}: "
+                "devuelve el material al almacén o traspásalo a otro responsable "
+                "antes de cerrar la asignación.")
+        # Solape: una asignación abierta ocupa el camión desde su inicio en adelante.
+        fin = self.fecha_fin or date.max
+        qs = UsuarioCamion.objects.filter(camion=self.camion, activo=True, fecha_inicio__lte=fin).filter(models.Q(fecha_fin__isnull=True)|models.Q(fecha_fin__gte=self.fecha_inicio))
         if self.pk: qs = qs.exclude(pk=self.pk)
         if qs.exists(): raise ValidationError("El camión ya tiene un encargado en ese rango de fechas.")
+
     def save(self, *args, **kwargs):
-        import datetime
         if not self.pk:
-            dia_anterior = self.fecha_inicio - datetime.timedelta(days=1)
-            UsuarioCamion.objects.filter(usuario=self.usuario, activo=True).filter(models.Q(fecha_fin__isnull=True)|models.Q(fecha_fin__gte=self.fecha_inicio)).update(fecha_fin=dia_anterior, activo=False)
+            # Antes esto cerraba la asignación anterior del usuario con un
+            # `update()` masivo, que se salta clean(): era la forma fácil de
+            # soltar un camión con saldo encima. Ahora se cierra una por una y
+            # cada cierre valida el saldo.
+            anteriores = (UsuarioCamion.objects
+                          .filter(usuario=self.usuario, activo=True)
+                          .filter(models.Q(fecha_fin__isnull=True)|models.Q(fecha_fin__gte=self.fecha_inicio)))
+            for anterior in anteriores:
+                anterior.liberar(self.fecha_inicio - timedelta(days=1))
         super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if self.saldo_camion() > 0:
+            raise ValidationError(
+                f"No se puede borrar la asignación: el camión {self.camion} tiene "
+                f"saldo a nombre de {self.usuario}.")
+        return super().delete(*args, **kwargs)
+
+    def liberar(self, fecha_fin=None, _traspaso=False):
+        """Cierra la asignación. Fuera de un traspaso exige el camión en cero."""
+        self.fecha_fin = fecha_fin or date.today()
+        self.activo    = False
+        self._traspaso_en_curso = _traspaso
+        try:
+            self.full_clean()
+            self.save()
+        finally:
+            self._traspaso_en_curso = False
+        return self
+
+    def traspasar_a(self, usuario_recibe, fecha=None, observacion=""):
+        """Entrega el camión a otro responsable: cierra esta asignación, abre la
+        del que recibe y levanta el acta con el saldo que cambió de manos."""
+        fecha = fecha or date.today()
+        if usuario_recibe.pk == self.usuario_id:
+            raise ValidationError("El camión ya está a nombre de ese usuario.")
+        if not self.activo:
+            raise ValidationError("Esta asignación ya está cerrada.")
+        with transaction.atomic():
+            acta = TraspasoCamion(camion=self.camion, usuario_entrega=self.usuario,
+                                  usuario_recibe=usuario_recibe, fecha=fecha,
+                                  observacion=observacion)
+            acta.full_clean()
+            acta.save()
+            for sc in (StockCamion.objects.filter(camion=self.camion, cantidad__gt=0)
+                       .select_related("material").order_by("material__matricula")):
+                DetalleTraspasoCamion.objects.create(
+                    traspaso=acta, material=sc.material, cantidad=sc.cantidad)
+            self.liberar(fecha, _traspaso=True)
+            nueva = UsuarioCamion(camion=self.camion, usuario=usuario_recibe,
+                                  fecha_inicio=fecha)
+            nueva.full_clean()
+            nueva.save()
+        return acta
     @staticmethod
     def camion_activo_de_usuario(usuario, fecha=None):
         fecha = fecha or date.today()
@@ -219,6 +310,40 @@ class StockCamion(models.Model):
         return f"{self.camion} | {self.material} | {self.cantidad}"
 
 
+class TraspasoCamion(models.Model):
+    """Acta de entrega de un camión con saldo: quién lo entrega, quién lo recibe
+    y qué material cambió de manos. Es lo que permite cerrar una asignación sin
+    que el stock del camión quede sin responsable."""
+    id_traspaso     = models.AutoField(primary_key=True)
+    camion          = models.ForeignKey(Camion,  on_delete=models.PROTECT, related_name="traspasos")
+    usuario_entrega = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name="traspasos_entregados")
+    usuario_recibe  = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name="traspasos_recibidos")
+    fecha           = models.DateField()
+    observacion     = models.TextField(blank=True)
+    class Meta:
+        db_table = "traspaso_camion"
+        ordering = ["-fecha", "-id_traspaso"]
+    def clean(self):
+        if self.usuario_entrega_id and self.usuario_entrega_id == self.usuario_recibe_id:
+            raise ValidationError("El que entrega y el que recibe no pueden ser el mismo.")
+    def __str__(self):
+        return f"{self.camion} | {self.usuario_entrega} → {self.usuario_recibe} ({self.fecha})"
+
+
+class DetalleTraspasoCamion(models.Model):
+    """Foto del saldo del camión en el momento del traspaso."""
+    id_detalle_traspaso = models.AutoField(primary_key=True)
+    traspaso = models.ForeignKey(TraspasoCamion, on_delete=models.CASCADE, related_name="detalles")
+    material = models.ForeignKey(Material,       on_delete=models.PROTECT, related_name="detalles_traspaso")
+    cantidad = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0)])
+    class Meta:
+        db_table = "detalle_traspaso_camion"
+        unique_together = ("traspaso", "material")
+        ordering = ["material__matricula"]
+    def __str__(self):
+        return f"{self.material} | {self.cantidad}"
+
+
 class Almacen(models.Model):
     id_almacen  = models.AutoField(primary_key=True)
     empresa     = models.ForeignKey(Empresa, on_delete=models.PROTECT, related_name="almacenes")
@@ -274,7 +399,7 @@ class IngresoTecsur(models.Model):
     class Meta:
         db_table = "ingreso_tecsur"
     def clean(self):
-        if self.usuario_id and not self.usuario.puede_hacer_inventario():
+        if self.usuario_id and not self.usuario.puede_gestionar_almacen():
             raise ValidationError("Solo el Encargado de Almacén puede registrar ingresos.")
     def __str__(self):
         return f"Ingreso {self.folio} | {self.almacen}"
@@ -301,7 +426,7 @@ class DevolucionTecsur(models.Model):
     class Meta:
         db_table = "devolucion_tecsur"
     def clean(self):
-        if self.usuario_id and not self.usuario.puede_hacer_inventario():
+        if self.usuario_id and not self.usuario.puede_gestionar_almacen():
             raise ValidationError("Solo el Encargado de Almacén puede registrar devoluciones a Tecsur.")
 
 
@@ -326,7 +451,7 @@ class MaterialMalogrado(models.Model):
     class Meta:
         db_table = "material_malogrado"
     def clean(self):
-        if self.usuario_id and not self.usuario.puede_hacer_inventario():
+        if self.usuario_id and not self.usuario.puede_gestionar_almacen():
             raise ValidationError("Solo el Encargado de Almacén puede registrar materiales malogrados.")
 
 
@@ -354,7 +479,7 @@ class TransferenciaAlmacen(models.Model):
     class Meta:
         db_table = "transferencia_almacen"
     def clean(self):
-        if self.usuario_id and not self.usuario.puede_hacer_inventario():
+        if self.usuario_id and not self.usuario.puede_gestionar_almacen():
             raise ValidationError("Solo el Encargado de Almacén puede realizar transferencias.")
         if self.almacen_origen_id == self.almacen_destino_id:
             raise ValidationError("El almacén origen y destino no pueden ser el mismo.")
@@ -504,9 +629,19 @@ class Inventario(models.Model):
         unique_together = [("camion","mes","anio"),("almacen","mes","anio")]
     def clean(self):
         if self.usuario_id and not self.usuario.puede_hacer_inventario():
-            raise ValidationError("Solo el Encargado de Almacén puede realizar inventarios.")
+            raise ValidationError("Este rol no puede realizar inventarios.")
         if self.camion_id and self.almacen_id: raise ValidationError("El inventario debe ser de un camión O un almacén, no ambos.")
         if not self.camion_id and not self.almacen_id: raise ValidationError("El inventario debe apuntar a un camión o un almacén.")
+        # El Capataz solo cuenta el camión que tiene asignado; el almacén es
+        # del Encargado de Almacén.
+        if self.usuario_id and self.usuario.rol_id == Rol.CAPATAZ:
+            if not self.camion_id:
+                raise ValidationError("El Capataz solo puede inventariar su camión, no el almacén.")
+            camion_asignado = UsuarioCamion.camion_activo_de_usuario(self.usuario, self.fecha or date.today())
+            if camion_asignado is None:
+                raise ValidationError("No tienes un camión asignado en este momento.")
+            if self.camion_id != camion_asignado.id_camion:
+                raise ValidationError("El camión no está asignado a este usuario.")
 
 
 class DetalleInventario(models.Model):

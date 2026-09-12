@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .authentication import LoginView, RefreshView
 from .views import (
     EmpresaViewSet, RolViewSet, UsuarioViewSet,
-    CamionViewSet, UsuarioCamionViewSet, SSTViewSet,
+    CamionViewSet, UsuarioCamionViewSet, TraspasoCamionViewSet, SSTViewSet,
     MaterialViewSet, StockCamionViewSet, AlmacenViewSet, StockAlmacenViewSet,
     ProveedorViewSet,
     IngresoTecsurViewSet, DevolucionTecsurViewSet,
@@ -22,6 +22,7 @@ router.register(r'roles',                 RolViewSet,                  basename=
 router.register(r'usuarios',              UsuarioViewSet,              basename='usuario')
 router.register(r'camiones',              CamionViewSet,               basename='camion')
 router.register(r'usuario-camion',        UsuarioCamionViewSet,        basename='usuario-camion')
+router.register(r'traspasos-camion',      TraspasoCamionViewSet,       basename='traspasos-camion')
 router.register(r'ssts',                  SSTViewSet,                  basename='sst')
 router.register(r'materiales',            MaterialViewSet,             basename='material')
 router.register(r'stock-camion',          StockCamionViewSet,          basename='stock-camion')

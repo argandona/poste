@@ -84,7 +84,7 @@ class Command(BaseCommand):
         # Asigna el primer camión al capataz (usuario de campo)
         if not UsuarioCamion.objects.filter(usuario=capataz, activo=True).exists():
             uc = UsuarioCamion(usuario=capataz, camion=camiones[0],
-                               fecha_inicio=date.today(), fecha_fin=date(2100, 1, 1))
+                               fecha_inicio=date.today())
             uc.save()
 
         # ── Materiales ──

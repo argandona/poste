@@ -12,6 +12,9 @@ services:
         generateValue: true
       - key: DEBUG
         value: "False"
+      # Sin esto el default era "*": cualquier Host pasaba la validación.
+      - key: ALLOWED_HOSTS
+        value: "tecsur-backend.onrender.com"
       - key: PYTHON_VERSION
         value: "3.13.4"
       - key: DATABASE_URL

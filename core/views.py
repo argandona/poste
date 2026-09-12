@@ -34,12 +34,28 @@ INCLUSIONES_CONSOLIDADO = {
         },
     },
 }
-from django.db import transaction
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import models, transaction
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
+from rest_framework.exceptions import APIException
 from rest_framework.parsers import MultiPartParser
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
+
+
+class ErrorNegocio(APIException):
+    """Error de regla de negocio dentro de un bloque transaccional.
+
+    Devolver un `Response` desde dentro de un `transaction.atomic()` sale del
+    bloque sin excepción, así que la transacción COMMITEA lo hecho hasta ahí:
+    un pedido de varios materiales podía descontar los primeros y responder 400
+    por el último. Lanzar esta excepción aborta la transacción y responde 400
+    con la misma forma que antes (`{"detail": "<texto>"}`), que es lo que espera
+    la app Flutter en api_service.dart.
+    """
+    status_code = status.HTTP_400_BAD_REQUEST
+    default_detail = 'Operación inválida.'
 
 
 class CatalogoPagination(PageNumberPagination):
@@ -51,7 +67,7 @@ class CatalogoPagination(PageNumberPagination):
 
 from .models import (
     ActividadTipoTrabajo, Actividad,
-    Empresa, Rol, Usuario, Camion, UsuarioCamion, SST,
+    Empresa, Rol, Usuario, Camion, UsuarioCamion, TraspasoCamion, SST,
     Material, StockCamion, Almacen, StockAlmacen, Proveedor,
     IngresoTecsur, DevolucionTecsur, MaterialMalogrado, TransferenciaAlmacen,
     Pedido, DetallePedido, Devolucion, DetalleDevolucion,
@@ -65,7 +81,8 @@ from .models import (
 from .serializers import (
     EmpresaSerializer, RolSerializer,
     UsuarioSerializer, UsuarioCreateSerializer,
-    CamionSerializer, UsuarioCamionSerializer, SSTSerializer,
+    CamionSerializer, UsuarioCamionSerializer, TraspasoCamionSerializer,
+    SSTSerializer,
     MaterialSerializer, StockCamionSerializer, AlmacenSerializer, StockAlmacenSerializer,
     ProveedorSerializer,
     IngresoTecsurSerializer, IngresoTecsurCreateSerializer,
@@ -216,6 +233,31 @@ class UsuarioCamionViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return UsuarioCamion.objects.select_related('camion','usuario').all()
 
+    # El ModelViewSet guarda sin pasar por clean(), así que las reglas de
+    # responsabilidad se validan a mano en cada escritura.
+    def _validar(self, instancia):
+        try:
+            instancia.full_clean()
+        except DjangoValidationError as e:
+            raise ErrorNegocio(' '.join(e.messages))
+
+    def perform_create(self, serializer):
+        self._validar(UsuarioCamion(**serializer.validated_data))
+        serializer.save()
+
+    def perform_update(self, serializer):
+        instancia = serializer.instance
+        for campo, valor in serializer.validated_data.items():
+            setattr(instancia, campo, valor)
+        self._validar(instancia)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        try:
+            instance.delete()
+        except DjangoValidationError as e:
+            raise ErrorNegocio(' '.join(e.messages))
+
     @action(detail=False, methods=['get'])
     def camion_activo(self, request):
         """GET /api/usuario-camion/camion_activo/?usuario=<id>"""
@@ -230,6 +272,109 @@ class UsuarioCamionViewSet(viewsets.ModelViewSet):
         if camion:
             return Response(CamionSerializer(camion).data)
         return Response({'detail': 'Sin camión asignado.'}, status=404)
+
+    # ── Soltar un camión es una operación, nunca un vencimiento ─────────────
+    # Mientras el camión tenga saldo, el responsable no puede desaparecer: o
+    # devuelve el material al almacén, o se lo entrega a otro con acta.
+
+    def _actor_gestiona_almacen(self, request):
+        actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
+        return actor if (actor and actor.puede_gestionar_almacen()) else None
+
+    @action(detail=True, methods=['post'])
+    def liberar(self, request, pk=None):
+        """POST /api/usuario-camion/{id}/liberar/ — cierra la asignación.
+
+        Solo si el camión quedó en cero; si tiene saldo hay que traspasarlo."""
+        if not self._actor_gestiona_almacen(request):
+            return Response(
+                {'detail': 'Solo el Encargado de Almacén puede liberar un camión.'},
+                status=403)
+        asignacion = self.get_object()
+        if not asignacion.activo:
+            raise ErrorNegocio('Esta asignación ya está cerrada.')
+        try:
+            asignacion.liberar()
+        except DjangoValidationError as e:
+            raise ErrorNegocio(' '.join(e.messages))
+        return Response(UsuarioCamionSerializer(asignacion).data)
+
+    @action(detail=False, methods=['post'])
+    def traspasar(self, request):
+        """POST /api/usuario-camion/traspasar/
+        Body: {camion: id, usuario_recibe: id, observacion?: str}
+
+        Cierra la asignación vigente y abre la del nuevo responsable en un solo
+        movimiento, dejando el acta con el saldo que cambió de manos."""
+        if not self._actor_gestiona_almacen(request):
+            return Response(
+                {'detail': 'Solo el Encargado de Almacén puede traspasar un camión.'},
+                status=403)
+        camion_id  = request.data.get('camion')
+        recibe_id  = request.data.get('usuario_recibe')
+        if not camion_id or not recibe_id:
+            raise ErrorNegocio('Se requiere camion y usuario_recibe.')
+        try:
+            camion = Camion.objects.get(pk=camion_id)
+            recibe = Usuario.objects.get(pk=recibe_id)
+        except (Camion.DoesNotExist, Usuario.DoesNotExist):
+            return Response({'detail': 'Camión o usuario no encontrado.'}, status=404)
+
+        asignacion = (UsuarioCamion.objects
+                      .filter(camion=camion, activo=True)
+                      .filter(models.Q(fecha_fin__isnull=True)|models.Q(fecha_fin__gte=datetime.date.today()))
+                      .select_related('usuario').first())
+        if asignacion is None:
+            raise ErrorNegocio(f'El camión {camion.placa} no tiene un responsable vigente.')
+        try:
+            acta = asignacion.traspasar_a(
+                recibe, observacion=request.data.get('observacion', ''))
+        except DjangoValidationError as e:
+            raise ErrorNegocio(' '.join(e.messages))
+        return Response(TraspasoCamionSerializer(acta).data, status=201)
+
+    @action(detail=False, methods=['get'])
+    def saldos_por_responsable(self, request):
+        """GET /api/usuario-camion/saldos_por_responsable/ — quién tiene qué encima."""
+        hoy = datetime.date.today()
+        vigentes = (UsuarioCamion.objects
+                    .filter(activo=True)
+                    .filter(models.Q(fecha_fin__isnull=True)|models.Q(fecha_fin__gte=hoy))
+                    .select_related('usuario', 'camion')
+                    .order_by('usuario__nombre'))
+        datos = []
+        for a in vigentes:
+            saldo = (StockCamion.objects.filter(camion=a.camion)
+                     .aggregate(t=models.Sum('cantidad'))['t'] or Decimal('0'))
+            materiales = (StockCamion.objects
+                          .filter(camion=a.camion, cantidad__gt=0).count())
+            datos.append({
+                'id_usuario_camion': a.pk,
+                'usuario':      a.usuario.nombre,
+                'id_usuario':   a.usuario_id,
+                'camion':       a.camion.placa,
+                'id_camion':    a.camion_id,
+                'fecha_inicio': a.fecha_inicio,
+                'materiales':   materiales,
+                'saldo_total':  saldo,
+                'puede_liberar': saldo == 0,
+            })
+        return Response(datos)
+
+
+class TraspasoCamionViewSet(viewsets.ReadOnlyModelViewSet):
+    """Actas de entrega de camión. Se crean con /usuario-camion/traspasar/."""
+    serializer_class   = TraspasoCamionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = (TraspasoCamion.objects
+              .select_related('camion', 'usuario_entrega', 'usuario_recibe')
+              .prefetch_related('detalles__material'))
+        camion = self.request.query_params.get('camion')
+        if camion:
+            qs = qs.filter(camion_id=camion)
+        return qs
 
 
 # ── SST ─────────────────────────────────────────────────────────────────────
@@ -740,7 +885,7 @@ class PedidoViewSet(viewsets.ModelViewSet):
             # Aprobar
             almacen = data.get('almacen')
             if not almacen:
-                return Response({'detail': 'Se requiere almacen para aprobar.'}, status=400)
+                raise ErrorNegocio('Se requiere almacen para aprobar.')
 
             for det_data in data.get('detalles', []):
                 det = DetallePedido.objects.get(pedido=pedido, material=det_data['material'])
@@ -750,7 +895,9 @@ class PedidoViewSet(viewsets.ModelViewSet):
                     stock = StockAlmacen.objects.get(almacen=almacen, material=det.material)
                     stock.descontar(cant_aprobada)
                 except StockAlmacen.DoesNotExist:
-                    return Response({'detail': f'Sin stock de {det.material} en el almacén.'}, status=400)
+                    raise ErrorNegocio(f'Sin stock de {det.material} en el almacén.')
+                except DjangoValidationError as exc:
+                    raise ErrorNegocio(exc.messages[0])
                 # Subir stock camion
                 stock_camion, _ = StockCamion.objects.get_or_create(
                     camion=pedido.camion, material=det.material, defaults={'cantidad': 0}
@@ -846,7 +993,7 @@ class DevolucionViewSet(viewsets.ModelViewSet):
 
             almacen_destino = data.get('almacen_destino')
             if not almacen_destino:
-                return Response({'detail': 'Se requiere almacen_destino para aprobar.'}, status=400)
+                raise ErrorNegocio('Se requiere almacen_destino para aprobar.')
 
             for det_data in data.get('detalles', []):
                 det = DetalleDevolucion.objects.get(devolucion=devolucion, material=det_data['material'])
@@ -856,7 +1003,9 @@ class DevolucionViewSet(viewsets.ModelViewSet):
                     stock_camion = StockCamion.objects.get(camion=devolucion.camion, material=det.material)
                     stock_camion.descontar(cant_aprobada)
                 except StockCamion.DoesNotExist:
-                    return Response({'detail': f'Sin stock de {det.material} en el camión.'}, status=400)
+                    raise ErrorNegocio(f'Sin stock de {det.material} en el camión.')
+                except DjangoValidationError as exc:
+                    raise ErrorNegocio(exc.messages[0])
                 # Subir al almacén
                 stock_alm, _ = StockAlmacen.objects.get_or_create(
                     almacen=almacen_destino, material=det.material, defaults={'cantidad': 0}
@@ -901,7 +1050,9 @@ class UploadConsumoViewSet(viewsets.ModelViewSet):
                         stock = StockCamion.objects.get(camion=consumo.camion, material=det.material)
                         stock.descontar(det.cantidad)
                     except StockCamion.DoesNotExist:
-                        return Response({'detail': f'Sin stock de {det.material} en camión {consumo.camion}.'}, status=400)
+                        raise ErrorNegocio(f'Sin stock de {det.material} en camión {consumo.camion}.')
+                    except DjangoValidationError as exc:
+                        raise ErrorNegocio(exc.messages[0])
             upload.estado = 'aprobado'
             upload.save()
         return Response({'detail': 'Consumo aprobado y stock descontado.'})
@@ -978,7 +1129,7 @@ class UploadConsumoViewSet(viewsets.ModelViewSet):
             )
 
             if upload.estado == 'aprobado':
-                return Response({'detail': 'Este SST ya tiene un consumo aprobado.'}, status=400)
+                raise ErrorNegocio('Este SST ya tiene un consumo aprobado.')
 
             for num_fila, row in enumerate(rows[1:], start=2):
                 if not any(row):
