@@ -98,7 +98,7 @@ class Command(BaseCommand):
 
         if not UsuarioCamion.objects.filter(usuario=capataz, activo=True).exists():
             UsuarioCamion(usuario=capataz, camion=camion,
-                          fecha_inicio=date.today(), fecha_fin=date(2100, 1, 1)).save()
+                          fecha_inicio=date.today()).save()
 
         # ── Catálogos: mano de obra + materiales + recuperos + stock ──
         call_command("cargar_mano_de_obra")

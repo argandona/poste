@@ -37,10 +37,11 @@ class BaseAPITestCase(APITestCase):
             email="encargado@tecsur.pe", clave="x")
 
         self.camion = Camion.objects.create(empresa=self.empresa, placa="ABC-123")
-        UsuarioCamion.objects.create(
+        # La asignación nace abierta: no vence sola, se cierra al liberar o
+        # traspasar el camión.
+        self.asignacion = UsuarioCamion.objects.create(
             camion=self.camion, usuario=self.capataz,
-            fecha_inicio=date.today() - timedelta(days=30),
-            fecha_fin=date.today() + timedelta(days=30))
+            fecha_inicio=date.today() - timedelta(days=30))
 
         self.almacen = Almacen.objects.create(empresa=self.empresa, nombre="Central")
 

@@ -32,6 +32,7 @@ MODELOS = [
     ("Devolucion",           models.Devolucion,           "id_devolucion"),
     ("UploadConsumo",        models.UploadConsumo,        "id_upload"),
     ("Inventario",           models.Inventario,           "id_inventario"),
+    ("TraspasoCamion",       models.TraspasoCamion,       "id_traspaso"),
 ]
 
 # Reglas que solo tienen sentido al MODIFICAR una fila, no al crearla. Una fila

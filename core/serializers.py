@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import (
     Empresa, Rol, Usuario, Camion, UsuarioCamion, SST,
+    TraspasoCamion, DetalleTraspasoCamion,
     Material, StockCamion, Almacen, StockAlmacen, Proveedor,
     IngresoTecsur, DetalleIngresoTecsur,
     DevolucionTecsur, DetalleDevolucionTecsur,
@@ -83,8 +84,36 @@ class CamionSerializer(serializers.ModelSerializer):
 class UsuarioCamionSerializer(serializers.ModelSerializer):
     usuario_nombre = serializers.CharField(source='usuario.nombre', read_only=True)
     camion_placa   = serializers.CharField(source='camion.placa',   read_only=True)
+    saldo_camion   = serializers.SerializerMethodField()
     class Meta:
         model  = UsuarioCamion
+        fields = '__all__'
+        # El cierre de una asignación no se edita a mano: pasa por
+        # /usuario-camion/{id}/liberar/ o /usuario-camion/traspasar/, que son
+        # los que verifican que el camión no quede con saldo sin responsable.
+        read_only_fields = ('fecha_fin', 'activo')
+
+    def get_saldo_camion(self, obj):
+        return obj.saldo_camion()
+
+
+# ── Traspaso de camión ───────────────────────────
+class DetalleTraspasoCamionSerializer(serializers.ModelSerializer):
+    material_matricula   = serializers.CharField(source='material.matricula', read_only=True)
+    material_descripcion = serializers.CharField(source='material.descripcion', read_only=True)
+    class Meta:
+        model  = DetalleTraspasoCamion
+        fields = ('id_detalle_traspaso', 'material', 'material_matricula',
+                  'material_descripcion', 'cantidad')
+
+
+class TraspasoCamionSerializer(serializers.ModelSerializer):
+    camion_placa    = serializers.CharField(source='camion.placa', read_only=True)
+    entrega_nombre  = serializers.CharField(source='usuario_entrega.nombre', read_only=True)
+    recibe_nombre   = serializers.CharField(source='usuario_recibe.nombre', read_only=True)
+    detalles        = DetalleTraspasoCamionSerializer(many=True, read_only=True)
+    class Meta:
+        model  = TraspasoCamion
         fields = '__all__'
 
 
