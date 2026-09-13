@@ -44,14 +44,20 @@ TIPOS = {
             "*090810",  # conector cualquier tipo hasta 300 mm2
         ],
     },
-    # Igual que el tipo "Otros" de la actividad sin viento: una sola partida y
-    # ningún material.
+    # Sin materiales: son horas y traslados, no cosas que se instalen.
     "Otros viento": {
         "materiales": [],
         "mano_de_obra": [
+            "*010101",  # hora de operario, traslado de cables inaccesible
             "*010213",  # traslado de cables de comunicación
         ],
     },
+}
+
+# La hora de operario es genérica en el catálogo; en estos trabajos se usa para
+# el traslado de cables, y el capataz necesita leerlo para no confundirla.
+DESCRIPCIONES_MANO_DE_OBRA = {
+    "*010101": "HORA DE OPERARIO (TRASLADO DE CABLES INACCESIBLE <=35MM)",
 }
 
 # Nombres de obra con los que el capataz reconoce el material. Reemplazan a la
@@ -75,6 +81,14 @@ class Command(BaseCommand):
                             .update(descripcion=descripcion))
             if actualizadas:
                 self.stdout.write(f"  {matricula} → {descripcion}")
+
+        for partida, descripcion in DESCRIPCIONES_MANO_DE_OBRA.items():
+            actualizadas = (ManoDeObra.objects
+                            .filter(partida=partida)
+                            .exclude(descripcion=descripcion)
+                            .update(descripcion=descripcion))
+            if actualizadas:
+                self.stdout.write(f"  {partida} → {descripcion}")
 
         for nombre, config in TIPOS.items():
             self._configurar(nombre, config)
