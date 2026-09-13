@@ -1472,6 +1472,83 @@ class RecuperoViewSet(viewsets.ModelViewSet):
             qs = qs.none()
         return Response(SuministroRecuperoSerializer(qs, many=True).data)
 
+    @action(detail=False, methods=['get'])
+    def formato_pdf(self, request):
+        """GET /api/recuperos/formato_pdf/?sst=<codigo>
+
+        El formato TS-REC-FR-001 de Tecsur, lleno con los recuperos de todos
+        los postes de esa SST, sumados por material."""
+        from django.http import HttpResponse
+
+        from .pdf_recupero import (
+            fecha_larga, generar_pdf_recupero, nombre_de_firma,
+        )
+
+        codigo = (request.query_params.get('sst') or '').strip()
+        if not codigo:
+            raise ErrorNegocio('Se requiere el código de la SST.')
+
+        sst = (SST.objects
+               .filter(models.Q(codigo=codigo) | models.Q(sst=codigo))
+               .select_related('empresa')
+               .first())
+        if sst is None:
+            return Response({'detail': f'No existe la SST {codigo}.'}, status=404)
+
+        # Los recuperos se cargan por poste; el formato es por SST, así que se
+        # juntan todos y se suma la cantidad de cada material.
+        suministros = Suministro.objects.filter(sst_suministros__sst=sst)
+        registros = (SuministroRecupero.objects
+                     .filter(suministro__in=suministros)
+                     .select_related('recupero')
+                     .order_by('recupero__descripcion'))
+        sumados = {}
+        for r in registros:
+            clave = r.recupero_id
+            if clave in sumados:
+                sumados[clave]['total'] += r.cantidad
+            else:
+                sumados[clave] = {
+                    'descripcion': r.recupero.descripcion,
+                    'unidad': r.recupero.unidad,
+                    'total': r.cantidad,
+                }
+        items = [{
+            'descripcion': v['descripcion'],
+            'unidad': v['unidad'],
+            'cantidad': (f"{v['total']:.2f}".rstrip('0').rstrip('.')),
+        } for v in sumados.values()]
+
+        actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
+        capataz = (Usuario.objects
+                   .filter(sst_encargados__sst=sst, rol_id=Rol.CAPATAZ)
+                   .select_related('rol').first())
+        if capataz is None:
+            capataz = (Usuario.objects
+                       .filter(suministros_asignados__sst=sst)
+                       .select_related('rol').distinct().first())
+
+        firma = nombre_de_firma(capataz.nombre if capataz else '')
+        pdf = generar_pdf_recupero({
+            'sst': sst.codigo or sst.sst,
+            'fecha': fecha_larga(sst.fecha_ejecucion),
+            'departamento': sst.distrito or '',
+            'contratista': sst.empresa.nombre if sst.empresa_id else '',
+            'reportado_por': actor.nombre if actor else '',
+            'capataz': capataz.nombre if capataz else '',
+            'cargo': capataz.rol.descripcion if capataz else '',
+            'firma': firma,
+            'firma_pie': (
+                f'Firmado electrónicamente desde la app · '
+                f'{fecha_larga()} · usuario #{capataz.id_usuario}'
+                if capataz else 'Sin capataz asignado'),
+        }, items)
+
+        resp = HttpResponse(pdf, content_type='application/pdf')
+        nombre = f'recupero_{sst.codigo or sst.sst}.pdf'
+        resp['Content-Disposition'] = f'attachment; filename="{nombre}"'
+        return resp
+
     @action(detail=False, methods=['post'])
     def registrar(self, request):
         """POST /api/recuperos/registrar/ { suministro, fecha?, items:[{recupero,cantidad}] }

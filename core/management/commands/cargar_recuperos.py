@@ -1,4 +1,5 @@
-"""Carga el catálogo de recuperos desde un archivo TSV (Matricula<TAB>Descripcion).
+"""Carga el catálogo de recuperos desde un TSV: matrícula, descripción y,
+opcional, la unidad de medida (por defecto UND).
 
 Uso:  python manage.py cargar_recuperos
 """
@@ -35,8 +36,11 @@ class Command(BaseCommand):
             if partes[0].lower() == "matricula":
                 continue
             matricula, descripcion = partes[0], partes[1]
+            # Tercera columna opcional: la unidad del formato TS-REC-FR-001.
+            unidad = partes[2] if len(partes) > 2 else "UND"
             _, nuevo = Recupero.objects.update_or_create(
-                matricula=matricula, defaults={"descripcion": descripcion})
+                matricula=matricula,
+                defaults={"descripcion": descripcion, "unidad": unidad})
             creados += 1 if nuevo else 0
             actualizados += 0 if nuevo else 1
 

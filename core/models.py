@@ -758,6 +758,9 @@ class Recupero(models.Model):
     id_recupero = models.AutoField(primary_key=True)
     matricula   = models.CharField(max_length=50, unique=True)
     descripcion = models.CharField(max_length=200)
+    # Unidad de medida para el formato TS-REC-FR-001: casi todo va por unidad,
+    # los cables por metro.
+    unidad      = models.CharField(max_length=10, default="UND")
     class Meta:
         db_table = "recupero"
     def __str__(self):
