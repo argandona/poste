@@ -65,8 +65,8 @@ class Command(BaseCommand):
         # ── Empresa ──
         empresa, _ = Empresa.objects.update_or_create(
             ruc="20123456789",
-            defaults=dict(nombre="TECSUR S.A.", direccion="Av. Principal 123, Lima",
-                          telefono="014567890", email="contacto@tecsur.pe"),
+            defaults=dict(nombre="ENCOSSA", direccion="Av. Principal 123, Lima",
+                          telefono="014567890", email="contacto@encossa.pe"),
         )
 
         # ── Usuarios ──
