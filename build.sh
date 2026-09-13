@@ -12,4 +12,4 @@ python manage.py createcachetable
 # es la única forma de mantenerlos al día en Render, que en el plan gratuito
 # no da consola para correr comandos a mano.
 python manage.py cargar_recuperos
-python manage.py configurar_alumbrado_viento
+python manage.py configurar_tipos_viento
