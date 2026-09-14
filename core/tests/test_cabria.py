@@ -11,17 +11,19 @@ from ..models import (
     Actividad, ActividadTipoTrabajo, ManoDeObra, Material, Rol, TipoTrabajo,
     TipoTrabajoManoDeObra, TipoTrabajoMaterial,
 )
-from ..management.commands.configurar_cabria import ACTIVIDAD, TIPOS
+from ..management.commands.configurar_cabria import (
+    ACTIVIDAD, CATALOGO, TIPOS,
+)
 from .base import BaseAPITestCase
 
 
 class ConfigurarCabriaTests(BaseAPITestCase):
 
-    def test_crea_la_actividad_con_sus_siete_tipos(self):
+    def test_crea_la_actividad_con_todos_sus_tipos(self):
         call_command("configurar_cabria", verbosity=0)
         actividad = Actividad.objects.get(nombre=ACTIVIDAD)
         ligados = ActividadTipoTrabajo.objects.filter(actividad=actividad)
-        self.assertEqual(ligados.count(), 7)
+        self.assertEqual(ligados.count(), len(TIPOS))
         self.assertEqual(
             sorted(l.tipo_trabajo.nombre for l in ligados), sorted(TIPOS))
 
@@ -32,11 +34,65 @@ class ConfigurarCabriaTests(BaseAPITestCase):
         for nombre in TIPOS:
             self.assertEqual(TipoTrabajo.objects.filter(nombre=nombre).count(), 1)
 
+    def test_mensula_simple_trae_sus_cantidades_iniciales(self):
+        # Lo que se propone al elegir el tipo de trabajo, para no escribir
+        # siempre lo mismo.
+        self._catalogo_completo()
+        call_command("configurar_cabria", verbosity=0)
+        tipo = TipoTrabajo.objects.get(nombre="Mensula simple")
+        por_matricula = {
+            m.material.matricula: m.cantidad_inicial
+            for m in tipo.materiales.select_related("material")}
+        self.assertEqual(por_matricula["5461238"], 8)
+        self.assertEqual(por_matricula["5335110"], 1)
+        self.assertEqual(por_matricula["5463118"], 3)
+        por_partida = {
+            p.mano_de_obra.partida: p.cantidad_inicial
+            for p in tipo.partidas.select_related("mano_de_obra")}
+        self.assertEqual(por_partida["*090191"], 1)
+
+    def test_mensula_doble_lleva_el_doble_de_mensulas(self):
+        self._catalogo_completo()
+        call_command("configurar_cabria", verbosity=0)
+        tipo = TipoTrabajo.objects.get(nombre="Mensula doble")
+        por_matricula = {
+            m.material.matricula: m.cantidad_inicial
+            for m in tipo.materiales.select_related("material")}
+        self.assertEqual(por_matricula["5335110"], 2)
+        self.assertEqual(por_matricula["5461238"], 14)
+
+    def test_otros_cabria_es_solo_mano_de_obra(self):
+        self._catalogo_completo()
+        call_command("configurar_cabria", verbosity=0)
+        tipo = TipoTrabajo.objects.get(nombre="Otros cabria")
+        self.assertEqual(tipo.materiales.count(), 0)
+        self.assertEqual(
+            sorted(p.mano_de_obra.partida for p in tipo.partidas.all()),
+            ["*010101", "*010213"])
+
+    def test_avisa_de_lo_que_falta_en_el_catalogo(self):
+        # Sin materiales en la base, el comando no revienta: los omite.
+        call_command("configurar_cabria", verbosity=0)
+        tipo = TipoTrabajo.objects.get(nombre="Mensula simple")
+        self.assertEqual(tipo.materiales.count(), 0)
+
+    def _catalogo_completo(self):
+        """Deja en la base los materiales y partidas que el comando espera."""
+        for config in CATALOGO.values():
+            for matricula in config["materiales"]:
+                Material.objects.get_or_create(
+                    matricula=matricula,
+                    defaults={"descripcion": matricula, "precio": "1.00"})
+            for partida in config["mano_de_obra"]:
+                ManoDeObra.objects.get_or_create(
+                    partida=partida,
+                    defaults={"descripcion": partida, "precio": "1.00"})
+
     def test_no_borra_lo_que_se_configuro_en_la_app(self):
         # Un despliegue no puede llevarse por delante el catálogo que el
         # Coordinador acaba de cargar.
         call_command("configurar_cabria", verbosity=0)
-        tipo = TipoTrabajo.objects.get(nombre="Poste cabria")
+        tipo = TipoTrabajo.objects.get(nombre="Poste cabria")  # sin catálogo
         partida = ManoDeObra.objects.create(
             partida="*010101", descripcion="HORA DE OPERARIO", precio="18.79")
         TipoTrabajoManoDeObra.objects.create(
@@ -49,9 +105,11 @@ class ConfigurarCabriaTests(BaseAPITestCase):
         self.assertEqual(tipo.partidas.count(), 1)
         self.assertEqual(tipo.materiales.count(), 1)
 
-    def test_los_tipos_nacen_vacios(self):
+    def test_los_tipos_sin_catalogo_nacen_vacios(self):
         call_command("configurar_cabria", verbosity=0)
         for nombre in TIPOS:
+            if nombre in CATALOGO:
+                continue
             tipo = TipoTrabajo.objects.get(nombre=nombre)
             self.assertEqual(tipo.partidas.count(), 0)
             self.assertEqual(tipo.materiales.count(), 0)
@@ -65,7 +123,7 @@ class ConfigurarCabriaTests(BaseAPITestCase):
         r = self.client.get("/api/tipos-trabajo/", {"actividad": actividad.pk})
         self.assertEqual(r.status_code, 200)
         datos = r.data["results"] if isinstance(r.data, dict) else r.data
-        self.assertEqual(len(datos), 7)
+        self.assertEqual(len(datos), len(TIPOS))
 
     def test_no_se_mezcla_con_las_otras_actividades(self):
         call_command("configurar_cabria", verbosity=0)
