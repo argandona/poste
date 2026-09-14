@@ -93,8 +93,11 @@ def _borde(tabla, extra=()):
 
 
 def _cabecera(es):
-    """Franja del formato: marca, la palabra FORMATO, y el bloque de control.
-    El título va en la segunda fila de esta misma tabla, como en el original."""
+    """Franja del formato: marca, la palabra FORMATO y el bloque de control.
+
+    En el .docx la marca y el bloque de control ocupan las dos filas, y en el
+    medio va el título. Sin esa combinación quedaban dos recuadros vacíos a los
+    costados del título, que es lo que se veía mal."""
     codigo = Paragraph(
         'Código&nbsp;&nbsp;&nbsp;: TS-REC-FR-001<br/>'
         'Versión&nbsp;&nbsp;: 01<br/>'
@@ -109,32 +112,34 @@ def _cabecera(es):
          Paragraph('REGISTRO DE MATERIALES DE RECUPERO', es['titulo']),
          ''],
     ]
-    return _borde(Table(filas, colWidths=COL_ENCABEZADO))
+    return _borde(Table(filas, colWidths=COL_ENCABEZADO), extra=[
+        ('SPAN', (0, 0), (0, 1)),
+        ('SPAN', (2, 0), (2, 1)),
+    ])
 
 
 def _datos(d, es):
-    """Los siete campos, en tres renglones dentro de una sola celda."""
-    def campo(etiqueta, valor, relleno=26):
-        texto = valor or '&nbsp;' * relleno
-        return f'{etiqueta}: {texto}'
+    """Los siete campos, cada uno en su casilla.
 
-    parrafos = [
-        Paragraph('&nbsp;&nbsp;&nbsp;&nbsp;'.join([
-            campo('N° SST', d['sst']),
-            campo('FECHA', d['fecha']),
-            campo('DEPARTAMENTO', d['departamento']),
-        ]), es['campo']),
-        Paragraph('&nbsp;&nbsp;&nbsp;&nbsp;'.join([
-            campo('CONTRATISTA', d['contratista']),
-            campo('REPORTADO POR', d['reportado_por']),
-        ]), es['campo']),
-        Paragraph('&nbsp;&nbsp;&nbsp;&nbsp;'.join([
-            campo('CAPATAZ', d['capataz']),
-            campo('CARGO', d['cargo']),
-        ]), es['campo']),
+    El .docx los mete todos en una sola celda separados por espacios, pero así
+    quedan corridos y desalineados. En casillas se leen mejor y es la forma que
+    se eligió."""
+    def campo(etiqueta, valor):
+        return Paragraph(f'{etiqueta}: {valor or ""}', es['campo'])
+
+    tercio = ANCHO_TOTAL / 3
+    filas = [
+        [campo('N° SST', d['sst']),
+         campo('FECHA', d['fecha']),
+         campo('DEPARTAMENTO', d['departamento'])],
+        [campo('CONTRATISTA', d['contratista']),
+         campo('REPORTADO POR', d['reportado_por']),
+         campo('CAPATAZ', d['capataz'])],
+        [campo('CARGO', d['cargo']), '', ''],
     ]
-    return _borde(Table([[parrafos]], colWidths=[ANCHO_TOTAL]),
-                  extra=[('TOPPADDING', (0, 0), (-1, -1), 5),
+    return _borde(Table(filas, colWidths=[tercio, tercio, tercio]),
+                  extra=[('SPAN', (0, 2), (2, 2)),
+                         ('TOPPADDING', (0, 0), (-1, -1), 5),
                          ('BOTTOMPADDING', (0, 0), (-1, -1), 5)])
 
 
