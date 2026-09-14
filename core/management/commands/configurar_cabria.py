@@ -43,8 +43,9 @@ MATERIALES_NUEVOS = {
                "P.CONDUCTOR DE COBRE 35 / 1,5 - 2,5MM2",
 }
 
+# Partida y precio. Sin precio la liquidación de esa partida sale en cero.
 PARTIDAS_NUEVAS = {
-    "*090430": "PORTALINEA DE PASO O REMATE DE 1 A 5 VIAS",
+    "*090430": ("PORTALINEA DE PASO O REMATE DE 1 A 5 VIAS", "26.91"),
 }
 
 # Tipo de trabajo → materiales y partidas con su cantidad inicial.
@@ -162,13 +163,17 @@ class Command(BaseCommand):
             if nuevo:
                 self.stdout.write(self.style.WARNING(
                     f"  Material creado SIN PRECIO: {matricula}"))
-        for partida, descripcion in PARTIDAS_NUEVAS.items():
-            _, nueva = ManoDeObra.objects.get_or_create(
+        for partida, (descripcion, precio) in PARTIDAS_NUEVAS.items():
+            obj, nueva = ManoDeObra.objects.get_or_create(
                 partida=partida,
-                defaults={"descripcion": descripcion, "precio": 0})
+                defaults={"descripcion": descripcion, "precio": precio})
             if nueva:
-                self.stdout.write(self.style.WARNING(
-                    f"  Partida creada SIN PRECIO: {partida}"))
+                self.stdout.write(f"  Partida creada: {partida} a {precio}")
+            elif not obj.precio:
+                # Quedó sin precio de una corrida anterior.
+                obj.precio = precio
+                obj.save(update_fields=["precio"])
+                self.stdout.write(f"  Precio cargado: {partida} a {precio}")
 
     def _catalogo(self, tipo, config):
         """Deja el conjunto exacto, con sus cantidades iniciales."""
