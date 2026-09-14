@@ -501,7 +501,8 @@ class TipoTrabajoPartidaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = TipoTrabajoManoDeObra
-        fields = ['id_mano_de_obra', 'partida', 'descripcion', 'precio']
+        fields = ['id_mano_de_obra', 'partida', 'descripcion', 'precio',
+                  'cantidad_inicial']
 
 
 class TipoTrabajoMaterialSerializer(serializers.ModelSerializer):
@@ -511,7 +512,7 @@ class TipoTrabajoMaterialSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = TipoTrabajoMaterial
-        fields = ['id_material', 'matricula', 'descripcion']
+        fields = ['id_material', 'matricula', 'descripcion', 'cantidad_inicial']
 
 
 class ActividadSerializer(serializers.ModelSerializer):

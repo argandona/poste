@@ -682,6 +682,9 @@ class TipoTrabajoManoDeObra(models.Model):
     id_tipo_trabajo_mano_de_obra = models.AutoField(primary_key=True)
     tipo_trabajo = models.ForeignKey(TipoTrabajo, on_delete=models.PROTECT, related_name="partidas")
     mano_de_obra = models.ForeignKey(ManoDeObra,  on_delete=models.PROTECT, related_name="tipos_trabajo")
+    # Lo que se propone al elegir el tipo de trabajo. El capataz lo corrige si
+    # en obra salió distinto; cero significa que arranca en blanco.
+    cantidad_inicial = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     class Meta:
         db_table = "tipo_trabajo_mano_de_obra"
         unique_together = (("tipo_trabajo", "mano_de_obra"),)
@@ -693,6 +696,9 @@ class TipoTrabajoMaterial(models.Model):
     id_tipo_trabajo_material = models.AutoField(primary_key=True)
     tipo_trabajo = models.ForeignKey(TipoTrabajo, on_delete=models.PROTECT, related_name="materiales")
     material     = models.ForeignKey(Material,    on_delete=models.PROTECT, related_name="tipos_trabajo")
+    # Lo que se propone al elegir el tipo de trabajo. El capataz lo corrige si
+    # en obra salió distinto; cero significa que arranca en blanco.
+    cantidad_inicial = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     class Meta:
         db_table = "tipo_trabajo_material"
         unique_together = (("tipo_trabajo", "material"),)
