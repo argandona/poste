@@ -1,9 +1,9 @@
-"""Genera el formato TS-REC-FR-001, Registro de Materiales de Recupero.
+"""Formato TS-REC-FR-001, Registro de Materiales de Recupero.
 
-Es el formato oficial de Tecsur, así que se respeta tal cual: mismo encabezado,
-mismas columnas y los 28 renglones de la plantilla, aunque sobren. Lo que la
-app aporta es el llenado: los recuperos que el capataz cargó en cada poste de
-la SST, sumados por material.
+Es un formato oficial de Tecsur, así que se calca: mismas tablas, mismos anchos
+de columna, mismos tamaños de letra y los 28 renglones de la plantilla, aunque
+sobren. Las medidas salen del propio .docx, convertidas de twips a centímetros.
+Lo único que la app agrega es el llenado y la firma.
 """
 import io
 from datetime import date
@@ -16,31 +16,53 @@ from reportlab.platypus import (
     Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
 )
 
-# La plantilla tiene 28 renglones y se imprime aunque queden vacíos: así el
-# capataz puede agregar a mano lo que aparezca después.
 RENGLONES = 28
 
-_NEGRO = colors.HexColor('#212121')
-_GRIS  = colors.HexColor('#EEEEEE')
+# Anchos del formato original, en twips, pasados a centímetros.
+_TWIP = 2.54 / 1440
+
+
+def _cm(twips):
+    return twips * _TWIP * cm
+
+
+ANCHO_TOTAL = _cm(10333)
+COL_ENCABEZADO = [_cm(1700), _cm(6300), _cm(2333)]
+COL_LISTADO = [_cm(500), _cm(5900), _cm(900), _cm(1100), _cm(1933)]
+
+_NEGRO = colors.HexColor('#000000')
 
 
 def _estilos():
-    base = ParagraphStyle('base', fontName='Helvetica', fontSize=8,
-                          leading=10, textColor=_NEGRO)
+    base = ParagraphStyle('base', fontName='Helvetica', fontSize=8, leading=9.6,
+                          textColor=_NEGRO)
+
+    def variante(nombre, tamano, negrita=False, centrado=False, cursiva=False):
+        fuente = 'Helvetica'
+        if negrita:
+            fuente = 'Helvetica-Bold'
+        elif cursiva:
+            fuente = 'Helvetica-Oblique'
+        return ParagraphStyle(nombre, parent=base, fontName=fuente,
+                              fontSize=tamano, leading=tamano * 1.2,
+                              alignment=1 if centrado else 0)
+
     return {
-        'base': base,
-        'celda': ParagraphStyle('celda', parent=base, fontSize=7.5, leading=9),
-        'titulo': ParagraphStyle('titulo', parent=base, fontName='Helvetica-Bold',
-                                 fontSize=12, leading=14, alignment=1),
-        'cabecera': ParagraphStyle('cabecera', parent=base,
-                                   fontName='Helvetica-Bold', fontSize=8),
-        'pie': ParagraphStyle('pie', parent=base, fontSize=7, leading=9),
-        'firma': ParagraphStyle('firma', parent=base,
-                                fontName='Helvetica-Oblique', fontSize=14,
-                                leading=16, alignment=1),
-        'firmaPie': ParagraphStyle('firmaPie', parent=base, fontSize=6.5,
-                                   leading=8, alignment=1,
-                                   textColor=colors.HexColor('#616161')),
+        'marca':     variante('marca', 13, negrita=True, centrado=True),
+        'codigo':    variante('codigo', 7),
+        'titulo':    variante('titulo', 11, negrita=True, centrado=True),
+        'campo':     variante('campo', 8, negrita=True),
+        'listado':   variante('listado', 10, negrita=True, centrado=True),
+        'thCentro':  variante('thCentro', 8, negrita=True, centrado=True),
+        'tdCentro':  variante('tdCentro', 8, centrado=True),
+        'td':        variante('td', 8),
+        'nota':      variante('nota', 7.5, negrita=True),
+        'verifica':  variante('verifica', 9, negrita=True, centrado=True),
+        'firmaPie':  variante('firmaPie', 8, negrita=True, centrado=True),
+        'firma':     variante('firma', 15, cursiva=True, centrado=True),
+        'trazable':  ParagraphStyle('trazable', parent=base, fontSize=6.5,
+                                    leading=8, alignment=1,
+                                    textColor=colors.HexColor('#616161')),
     }
 
 
@@ -54,144 +76,122 @@ def nombre_de_firma(nombre_completo):
         return ''
     if len(partes) == 1:
         return partes[0]
-    # Con dos nombres y dos apellidos, el apellido es la penúltima palabra.
+    # Con dos nombres y dos apellidos, el apellido es la tercera palabra.
     apellido = partes[2] if len(partes) >= 4 else partes[-1]
     return f'{partes[0]} {apellido}'
 
 
-def _encabezado(datos, es):
-    """La franja del formato: código, versión y aprobación, tal cual."""
-    marca = Paragraph('<b>Tecsur</b>', es['titulo'])
-    formato = Paragraph('FORMATO', es['cabecera'])
+def _borde(tabla, extra=()):
+    tabla.setStyle(TableStyle([
+        ('GRID', (0, 0), (-1, -1), 0.75, _NEGRO),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        *extra,
+    ]))
+    return tabla
+
+
+def _cabecera(es):
+    """Franja del formato: marca, la palabra FORMATO, y el bloque de control.
+    El título va en la segunda fila de esta misma tabla, como en el original."""
     codigo = Paragraph(
         'Código&nbsp;&nbsp;&nbsp;: TS-REC-FR-001<br/>'
         'Versión&nbsp;&nbsp;: 01<br/>'
         'Aprobado : GO<br/>'
         'Fecha&nbsp;&nbsp;&nbsp;&nbsp;: 26/01/2024<br/>'
-        'Página&nbsp;&nbsp;&nbsp;: 1 de 1',
-        es['pie'])
-    tabla = Table([[marca, formato, codigo]],
-                  colWidths=[3.5 * cm, 9.5 * cm, 5 * cm])
-    tabla.setStyle(TableStyle([
-        ('GRID', (0, 0), (-1, -1), 0.6, _NEGRO),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('ALIGN', (0, 0), (1, 0), 'CENTER'),
-        ('LEFTPADDING', (2, 0), (2, 0), 6),
-    ]))
-    return tabla
-
-
-def _datos(datos, es):
-    def campo(etiqueta, valor):
-        return Paragraph(f'<b>{etiqueta}:</b> {valor or ""}', es['base'])
-
+        'Página&nbsp;&nbsp;&nbsp;: 1 de 1', es['codigo'])
     filas = [
-        [campo('N° SST', datos['sst']), campo('FECHA', datos['fecha']),
-         campo('DEPARTAMENTO', datos['departamento'])],
-        [campo('CONTRATISTA', datos['contratista']),
-         campo('REPORTADO POR', datos['reportado_por']), ''],
-        [campo('CAPATAZ', datos['capataz']), campo('CARGO', datos['cargo']), ''],
+        [Paragraph('Tecsur', es['marca']),
+         Paragraph('FORMATO', es['marca']),
+         codigo],
+        ['',
+         Paragraph('REGISTRO DE MATERIALES DE RECUPERO', es['titulo']),
+         ''],
     ]
-    tabla = Table(filas, colWidths=[6 * cm, 6 * cm, 6 * cm])
-    tabla.setStyle(TableStyle([
-        ('GRID', (0, 0), (-1, -1), 0.6, _NEGRO),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 5),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-    ]))
-    return tabla
+    return _borde(Table(filas, colWidths=COL_ENCABEZADO))
+
+
+def _datos(d, es):
+    """Los siete campos, en tres renglones dentro de una sola celda."""
+    def campo(etiqueta, valor, relleno=26):
+        texto = valor or '&nbsp;' * relleno
+        return f'{etiqueta}: {texto}'
+
+    parrafos = [
+        Paragraph('&nbsp;&nbsp;&nbsp;&nbsp;'.join([
+            campo('N° SST', d['sst']),
+            campo('FECHA', d['fecha']),
+            campo('DEPARTAMENTO', d['departamento']),
+        ]), es['campo']),
+        Paragraph('&nbsp;&nbsp;&nbsp;&nbsp;'.join([
+            campo('CONTRATISTA', d['contratista']),
+            campo('REPORTADO POR', d['reportado_por']),
+        ]), es['campo']),
+        Paragraph('&nbsp;&nbsp;&nbsp;&nbsp;'.join([
+            campo('CAPATAZ', d['capataz']),
+            campo('CARGO', d['cargo']),
+        ]), es['campo']),
+    ]
+    return _borde(Table([[parrafos]], colWidths=[ANCHO_TOTAL]),
+                  extra=[('TOPPADDING', (0, 0), (-1, -1), 5),
+                         ('BOTTOMPADDING', (0, 0), (-1, -1), 5)])
 
 
 def _listado(items, es):
-    filas = [[
-        Paragraph('<b>N°</b>', es['celda']),
-        Paragraph('<b>DESCRIPCIÓN</b>', es['celda']),
-        Paragraph('<b>UND.</b>', es['celda']),
-        Paragraph('<b>CANTIDAD</b>', es['celda']),
-        Paragraph('<b>OBSERVACIÓN</b>', es['celda']),
-    ]]
+    filas = [[Paragraph(t, es['thCentro']) for t in
+              ('N°', 'DESCRIPCIÓN', 'UND.', 'CANTIDAD', 'OBSERVACIÓN')]]
     for i in range(RENGLONES):
         item = items[i] if i < len(items) else None
         filas.append([
-            Paragraph(str(i + 1), es['celda']),
-            Paragraph(item['descripcion'] if item else '', es['celda']),
-            Paragraph(item['unidad'] if item else '', es['celda']),
-            Paragraph(item['cantidad'] if item else '', es['celda']),
-            '',  # la observación se llena a mano si hace falta
+            Paragraph(str(i + 1), es['tdCentro']),
+            Paragraph(item['descripcion'] if item else '', es['td']),
+            Paragraph(item['unidad'] if item else '', es['tdCentro']),
+            Paragraph(item['cantidad'] if item else '', es['tdCentro']),
+            '',  # la observación casi nunca se llena; se deja para la mano
         ])
-    tabla = Table(filas, repeatRows=1,
-                  colWidths=[1.1 * cm, 8.4 * cm, 1.6 * cm, 2.2 * cm, 4.7 * cm])
-    tabla.setStyle(TableStyle([
-        ('GRID', (0, 0), (-1, -1), 0.5, _NEGRO),
-        ('BACKGROUND', (0, 0), (-1, 0), _GRIS),
-        ('ALIGN', (0, 0), (0, -1), 'CENTER'),
-        ('ALIGN', (2, 0), (3, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 1), (-1, -1), 2),
-        ('BOTTOMPADDING', (0, 1), (-1, -1), 2),
-    ]))
-    return tabla
-
-
-def _pie(datos, es):
-    nota = Paragraph(
-        '<b>Materiales de Recupero:</b> Se consideran a todos los materiales '
-        'que son retirados durante la ejecución y finalización de la obra, '
-        'debiendo ser entregados al Almacén de Reciclaje de Tecsur por las '
-        'Contratistas.<br/>Ejemplo: Cables, Fierro, Luminarias, Seccionadores, '
-        'Interruptores, Aisladores, etc.', es['pie'])
-
-    firma = [
-        Paragraph(datos['firma'], es['firma']),
-        Paragraph('_' * 34, es['firmaPie']),
-        Paragraph('<b>FIRMA CAPATAZ</b>', es['firmaPie']),
-        Paragraph(datos['firma_pie'], es['firmaPie']),
-    ]
-
-    tabla = Table(
-        [[Paragraph('<b>VERIFICACIÓN Y CONFORMIDAD DE LAS ACCIONES</b>',
-                    es['cabecera'])],
-         [nota],
-         [firma]],
-        colWidths=[18 * cm])
-    tabla.setStyle(TableStyle([
-        ('GRID', (0, 0), (-1, -1), 0.6, _NEGRO),
-        ('BACKGROUND', (0, 0), (0, 0), _GRIS),
-        ('ALIGN', (0, 0), (0, 0), 'CENTER'),
-        ('TOPPADDING', (0, 2), (0, 2), 14),
-        ('BOTTOMPADDING', (0, 2), (0, 2), 8),
-    ]))
-    return tabla
+    return _borde(
+        Table(filas, colWidths=COL_LISTADO, repeatRows=1),
+        extra=[('TOPPADDING', (0, 1), (-1, -1), 2),
+               ('BOTTOMPADDING', (0, 1), (-1, -1), 2)])
 
 
 def generar_pdf_recupero(datos, items):
-    """Arma el formato. `datos` trae el encabezado y la firma; `items`, la lista
-    de recuperos ya sumada, cada uno con descripcion, unidad y cantidad."""
+    """Arma el formato. `datos` trae el encabezado y la firma; `items`, los
+    recuperos ya sumados, cada uno con descripcion, unidad y cantidad."""
     buffer = io.BytesIO()
+    margen = (A4[0] - ANCHO_TOTAL) / 2
     doc = SimpleDocTemplate(
         buffer, pagesize=A4,
-        leftMargin=1.4 * cm, rightMargin=1.4 * cm,
+        leftMargin=margen, rightMargin=margen,
         topMargin=1.2 * cm, bottomMargin=1.2 * cm,
         title=f'Registro de materiales de recupero {datos["sst"]}',
     )
     es = _estilos()
     doc.build([
-        _encabezado(datos, es),
-        Spacer(1, 6),
-        Paragraph('REGISTRO DE MATERIALES DE RECUPERO', es['titulo']),
-        Spacer(1, 6),
+        _cabecera(es),
         _datos(datos, es),
-        Spacer(1, 6),
-        Table([[Paragraph('<b>LISTADO</b>', es['cabecera'])]],
-              colWidths=[18 * cm],
-              style=TableStyle([
-                  ('GRID', (0, 0), (-1, -1), 0.6, _NEGRO),
-                  ('BACKGROUND', (0, 0), (0, 0), _GRIS),
-                  ('ALIGN', (0, 0), (0, 0), 'CENTER'),
-              ])),
+        Spacer(1, 8),
+        _borde(Table([[Paragraph('LISTADO', es['listado'])]],
+                     colWidths=[ANCHO_TOTAL])),
         _listado(items, es),
         Spacer(1, 6),
-        _pie(datos, es),
+        Paragraph(
+            'Materiales de Recupero: Se consideran a todos los materiales que '
+            'son retirados durante la ejecución y finalización de la obra, '
+            'debiendo ser entregados al Almacén de Reciclaje de Tecsur por las '
+            'Contratistas.', es['nota']),
+        Paragraph(
+            'Ejemplo: Cables, Fierro, Luminarias, Seccionadores, Interruptores, '
+            'Aisladores, etc.', es['nota']),
+        Spacer(1, 6),
+        _borde(Table([[Paragraph('VERIFICACIÓN Y CONFORMIDAD DE LAS ACCIONES',
+                                 es['verifica'])]],
+                     colWidths=[ANCHO_TOTAL])),
+        Spacer(1, 18),
+        Paragraph(datos['firma'], es['firma']),
+        Paragraph('FIRMA CAPATAZ', es['firmaPie']),
+        Paragraph(datos['firma_pie'], es['trazable']),
     ])
     return buffer.getvalue()
 
