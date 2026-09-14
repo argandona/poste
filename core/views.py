@@ -33,6 +33,16 @@ INCLUSIONES_CONSOLIDADO = {
             'divisor': Decimal('6'), 'umbral': 100,
         },
     },
+    'cambio de poste inacc. cabria aereo': {
+        # Sin paquete: aquí no se cuentan cambios de poste.
+        'paquete': [],
+        'incluidos': {
+            # Cada retenida, sea violín anclada o templador aéreo, ya trae
+            # incluido su perno de anclaje: no se cobra dos veces si además
+            # se liquidó en ferretería.
+            '*090392': {'segun': ['*090310', '*090320'], 'cantidad': 1},
+        },
+    },
 }
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models, transaction
@@ -1672,7 +1682,13 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
                 cfg = regla['incluidos'].get(pc) if regla else None
                 if cfg is not None:
                     if isinstance(cfg, dict):
-                        base = g['partidas'].get(cfg['segun'], {}).get('cantidad', Decimal('0'))
+                        # 'segun' puede ser una partida o varias que suman.
+                        segun = cfg['segun']
+                        claves = segun if isinstance(segun, (list, tuple)) else [segun]
+                        base = sum(
+                            (g['partidas'].get(k, {}).get('cantidad', Decimal('0'))
+                             for k in claves),
+                            Decimal('0'))
                         incl = base * Decimal(cfg['cantidad'])
                     else:
                         incl = num * Decimal(cfg)
