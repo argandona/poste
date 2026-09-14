@@ -46,6 +46,7 @@ MATERIALES_NUEVOS = {
 # Partida y precio. Sin precio la liquidación de esa partida sale en cero.
 PARTIDAS_NUEVAS = {
     "*090430": ("PORTALINEA DE PASO O REMATE DE 1 A 5 VIAS", "26.91"),
+    "*090310": ("RETENIDA SIMPLE O VIOLIN MT O BT", "343.83"),
 }
 
 # Tipo de trabajo → materiales y partidas con su cantidad inicial.
@@ -110,6 +111,24 @@ CATALOGO = {
             "*090430": 0,  # portalínea de paso o remate
         },
     },
+    # Retenida violín. La zapata y la barra de anclaje arrancan en blanco: no
+    # se usan siempre, y son las que deciden qué partida se cobra.
+    "Retenida Violin": {
+        "materiales": {
+            "5016361": 9,  # cable de acero para retenida
+            "5419120": 4,  # amarre preformado
+            "5217631": 1,  # aislador de tensión
+            "5467804": 1,  # brazo de apoyo tipo violín
+            "5467624": 1,  # canaleta protectora
+            "5464101": 1,  # eslabón angular
+            "5329301": 0,  # zapata de concreto   -> *090310
+            "5467101": 0,  # barra con ojo        -> *090310
+        },
+        "mano_de_obra": {
+            "*090310": 0,  # retenida simple o violín: anclada a tierra
+            "*090320": 0,  # retenida-templador aéreo: sin anclaje a tierra
+        },
+    },
     "Mensula doble": {
         "materiales": {
             "5461238": 14,
@@ -167,9 +186,12 @@ class Command(BaseCommand):
             obj, nueva = ManoDeObra.objects.get_or_create(
                 partida=partida,
                 defaults={"descripcion": descripcion, "precio": precio})
-            if nueva:
+            if nueva and float(precio) == 0:
+                self.stdout.write(self.style.WARNING(
+                    f"  Partida creada SIN PRECIO: {partida}"))
+            elif nueva:
                 self.stdout.write(f"  Partida creada: {partida} a {precio}")
-            elif not obj.precio:
+            elif not obj.precio and float(precio) > 0:
                 # Quedó sin precio de una corrida anterior.
                 obj.precio = precio
                 obj.save(update_fields=["precio"])
