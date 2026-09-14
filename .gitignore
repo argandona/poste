@@ -19,3 +19,7 @@ media/
 .idea/
 .vscode/
 .DS_Store
+
+# Migracion de base: URLs y respaldos, nunca al repositorio
+.env.migracion
+respaldo_*.json
