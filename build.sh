@@ -13,3 +13,4 @@ python manage.py createcachetable
 # no da consola para correr comandos a mano.
 python manage.py cargar_recuperos
 python manage.py configurar_tipos_viento
+python manage.py configurar_cabria
