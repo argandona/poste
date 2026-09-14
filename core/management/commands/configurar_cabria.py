@@ -131,6 +131,23 @@ CATALOGO = {
             "*090320": 0,  # retenida-templador aéreo: sin anclaje a tierra
         },
     },
+    # Retenida simple: la misma lógica que la violín, pero sin brazo de apoyo
+    # ni fleje, y con el anclaje al piso como caso normal.
+    "Retenida simple": {
+        "materiales": {
+            "5016361": 9,  # cable de acero para retenida
+            "5419120": 4,  # amarre preformado
+            "5217631": 1,  # aislador de tensión
+            "5467624": 1,  # canaleta protectora
+            "5464101": 1,  # eslabón angular
+            "5329301": 1,  # zapata de concreto   -> *090310
+            "5467101": 1,  # barra con ojo        -> *090310
+        },
+        "mano_de_obra": {
+            "*090310": 0,  # retenida simple o violín: anclada a tierra
+            "*090320": 0,  # retenida-templador aéreo: sin anclaje a tierra
+        },
+    },
     "Mensula doble": {
         "materiales": {
             "5461238": 14,
