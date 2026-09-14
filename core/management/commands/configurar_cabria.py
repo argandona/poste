@@ -29,6 +29,24 @@ TIPOS = [
     "Otros cabria",
 ]
 
+# Conectores de cuña que la ferretería usa y que no estaban en el catálogo.
+# Se crean sin precio: hay que cargárselo antes de liquidar con ellos.
+MATERIALES_NUEVOS = {
+    "5411060": "CONECTOR CUÑA TP UDC. REF. CU.70/35MM2",
+    "5411063": "CONECTOR DE DERIVACION DE COBRE ESTAÑADO TP.CUÑA "
+               "P.CONDUCTOR DE COBRE 70 / 70MM2",
+    "5411076": "CONECTOR DE DERIVACION DE COBRE ESTAÑADO TP.CUÑA "
+               "P.CONDUCTOR DE COBRE 70 / 2,5-4-6MM2",
+    "5411078": "CONECTOR DE DERIVACION DE COBRE ESTAÑADO TP.CUÑA "
+               "P.CONDUCTOR DE COBRE 70 / 1,5 MM2",
+    "5411072": "CONECTOR DE DERIVACION DE COBRE ESTAÑADO TP.CUÑA "
+               "P.CONDUCTOR DE COBRE 35 / 1,5 - 2,5MM2",
+}
+
+PARTIDAS_NUEVAS = {
+    "*090430": "PORTALINEA DE PASO O REMATE DE 1 A 5 VIAS",
+}
+
 # Tipo de trabajo → materiales y partidas con su cantidad inicial.
 CATALOGO = {
     "Otros cabria": {
@@ -52,6 +70,43 @@ CATALOGO = {
             "*090191": 1,  # colocación de cruceta o ménsula simple
             "*090060": 1,  # diagonal para cruceta
             "*090065": 1,  # abrazadera para perfil
+        },
+    },
+    # Ferretería no trae cantidades: se carga lo que se usó en cada poste.
+    "Ferreteria": {
+        "materiales": {
+            "5422366": 0,  # grapa de dos vías      -> *090394
+            "5422364": 0,  # grapa de una vía       -> *090394
+            "5463620": 0,  # ojal roscado
+            "1015413": 0,  # guardacabo
+            "5461510": 0,  # arandela cuadrada curva
+            "5464210": 0,  # perno con ojal         -> *090392
+            "5467060": 0,  # perno hexagonal        -> *090392
+            "5464501": 0,  # soporte fin de línea   -> *090430
+            "5021243": 0,  # conductor TW 16mm2     -> *090080
+            "5111215": 0,  # empalme para un conector
+            "5111218": 0,  # empalme para dos conectores
+            # Conectores de cuña: cada uno paga un empalme aéreo.
+            "5411011": 0,
+            "5411050": 0,
+            "5411052": 0,
+            "5411054": 0,
+            "5411056": 0,
+            "5411058": 0,
+            "5411060": 0,
+            "5411062": 0,
+            "5411063": 0,
+            "5411072": 0,
+            "5411076": 0,
+            "5411078": 0,
+        },
+        "mano_de_obra": {
+            "*090238": 0,  # escalamiento de poste (se carga a mano)
+            "*090392": 0,  # perno para anclaje
+            "*090394": 0,  # punto de fijación
+            "*090080": 0,  # conductor hasta 25 mm2
+            "*091608": 0,  # empalme aéreo por conector
+            "*090430": 0,  # portalínea de paso o remate
         },
     },
     "Mensula doble": {
@@ -78,6 +133,7 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
+        self._crear_lo_que_falta()
         actividad, nueva = Actividad.objects.get_or_create(nombre=ACTIVIDAD)
         if nueva:
             self.stdout.write(f"Actividad creada: {ACTIVIDAD}")
@@ -92,6 +148,27 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             f"{ACTIVIDAD}: {actividad.tipos_trabajo.count()} tipos de trabajo, "
             f"{len(CATALOGO)} con catálogo definido."))
+
+    def _crear_lo_que_falta(self):
+        """Da de alta lo que la actividad usa y el catálogo no tenía.
+
+        Nacen sin precio, así que se avisa: sin precio, la liquidación de esa
+        partida sale en cero.
+        """
+        for matricula, descripcion in MATERIALES_NUEVOS.items():
+            _, nuevo = Material.objects.get_or_create(
+                matricula=matricula,
+                defaults={"descripcion": descripcion, "precio": 0})
+            if nuevo:
+                self.stdout.write(self.style.WARNING(
+                    f"  Material creado SIN PRECIO: {matricula}"))
+        for partida, descripcion in PARTIDAS_NUEVAS.items():
+            _, nueva = ManoDeObra.objects.get_or_create(
+                partida=partida,
+                defaults={"descripcion": descripcion, "precio": 0})
+            if nueva:
+                self.stdout.write(self.style.WARNING(
+                    f"  Partida creada SIN PRECIO: {partida}"))
 
     def _catalogo(self, tipo, config):
         """Deja el conjunto exacto, con sus cantidades iniciales."""
