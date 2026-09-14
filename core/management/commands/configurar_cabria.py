@@ -121,6 +121,8 @@ CATALOGO = {
             "5467804": 1,  # brazo de apoyo tipo violín
             "5467624": 1,  # canaleta protectora
             "5464101": 1,  # eslabón angular
+            "1014213": 2,  # fleje de acero inoxidable
+            "1014308": 2,  # grapa o hebilla para el fleje
             "5329301": 0,  # zapata de concreto   -> *090310
             "5467101": 0,  # barra con ojo        -> *090310
         },
