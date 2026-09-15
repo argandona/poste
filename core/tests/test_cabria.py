@@ -70,6 +70,21 @@ class ConfigurarCabriaTests(BaseAPITestCase):
             sorted(p.mano_de_obra.partida for p in tipo.partidas.all()),
             ["*010101", "*010213"])
 
+    def test_conexiones_cabria_queda_con_su_catalogo(self):
+        self._catalogo_completo()
+        call_command("configurar_cabria", verbosity=0)
+        tipo = TipoTrabajo.objects.get(nombre="Conexiones cabria")
+        self.assertEqual(tipo.materiales.count(), 14)
+        self.assertEqual(
+            sorted(p.mano_de_obra.partida for p in tipo.partidas.all()),
+            ["*093043", "*093045", "*093081", "*093242", "*093247"])
+
+    def test_el_traslado_de_corona_se_crea_con_su_precio(self):
+        call_command("configurar_cabria", verbosity=0)
+        partida = ManoDeObra.objects.get(partida="*093043")
+        self.assertEqual(str(partida.precio), "58.45")
+        self.assertIn("CORONA", partida.descripcion)
+
     def test_la_hora_de_operario_queda_al_precio_pactado(self):
         # El catálogo la traía a otro precio y de ahí sale el traslado de
         # cable delgado, así que el comando la corrige.
