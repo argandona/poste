@@ -92,7 +92,11 @@ class ConfigurarCabriaTests(BaseAPITestCase):
         # Un despliegue no puede llevarse por delante el catálogo que el
         # Coordinador acaba de cargar.
         call_command("configurar_cabria", verbosity=0)
-        tipo = TipoTrabajo.objects.get(nombre="Poste cabria")  # sin catálogo
+        # Un tipo que el comando no define: lo agregó el Coordinador a mano.
+        actividad = Actividad.objects.get(nombre=ACTIVIDAD)
+        tipo = TipoTrabajo.objects.create(nombre="Tipo hecho en la app")
+        ActividadTipoTrabajo.objects.create(
+            actividad=actividad, tipo_trabajo=tipo)
         partida = ManoDeObra.objects.create(
             partida="*010101", descripcion="HORA DE OPERARIO", precio="18.79")
         TipoTrabajoManoDeObra.objects.create(
@@ -105,14 +109,9 @@ class ConfigurarCabriaTests(BaseAPITestCase):
         self.assertEqual(tipo.partidas.count(), 1)
         self.assertEqual(tipo.materiales.count(), 1)
 
-    def test_los_tipos_sin_catalogo_nacen_vacios(self):
-        call_command("configurar_cabria", verbosity=0)
-        for nombre in TIPOS:
-            if nombre in CATALOGO:
-                continue
-            tipo = TipoTrabajo.objects.get(nombre=nombre)
-            self.assertEqual(tipo.partidas.count(), 0)
-            self.assertEqual(tipo.materiales.count(), 0)
+    def test_todos_los_tipos_tienen_su_catalogo_definido(self):
+        # Si alguno se queda fuera, nace vacío y hay que cargarlo a mano.
+        self.assertEqual(sorted(CATALOGO), sorted(TIPOS))
 
     def test_la_app_los_ve_por_actividad(self):
         call_command("configurar_cabria", verbosity=0)

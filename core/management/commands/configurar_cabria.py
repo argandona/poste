@@ -47,6 +47,8 @@ MATERIALES_NUEVOS = {
 
 # Partida y precio. Sin precio la liquidación de esa partida sale en cero.
 PARTIDAS_NUEVAS = {
+    "*090163": ("TRASLADO CABLE AUTOSOPORTADO DE BT CU O AL MAYOR DE 50 "
+                "HASTA 120 mm2", "9.71"),
     "*090430": ("PORTALINEA DE PASO O REMATE DE 1 A 5 VIAS", "26.91"),
     "*090310": ("RETENIDA SIMPLE O VIOLIN MT O BT", "343.83"),
 }
@@ -74,6 +76,36 @@ CATALOGO = {
             "*090191": 1,  # colocación de cruceta o ménsula simple
             "*090060": 1,  # diagonal para cruceta
             "*090065": 1,  # abrazadera para perfil
+        },
+    },
+    # El cambio de poste con cabria. Casi todas las partidas se llenan solas o
+    # se cargan a mano; ver las reglas en reglas_liquidacion.dart.
+    "Poste cabria": {
+        "materiales": {
+            "5331596": 0,  # poste PRFV 7,5
+            "5331616": 0,  # poste PRFV 9
+            "1014213": 0,  # fleje de acero inoxidable
+            "1014308": 0,  # grapa o hebilla para el fleje
+        },
+        "mano_de_obra": {
+            "*094395": 0,  # inspección previa
+            "*095266": 0,  # reparación de vereda
+            "*091840": 0,  # rotura de vereda      (= reparación)
+            "*091842": 0,  # corte de vereda       (a mano)
+            "*090248": 0,  # colocación de trípodes (a mano)
+            "*090636": 0,  # traslado de postes a disposición final
+            "*090634": 0,  # traslado manual       (excedente del arrastre)
+            "*090633": 0,  # acarreo para cimentación
+            "*094913": 0,  # punta de diamante     (a mano)
+            "*094918": 0,  # cimentación           (a mano)
+            "*094911": 0,  # solera de concreto    (a mano)
+            "*090482": 0,  # instalación de poste provisional
+            "*090468": 0,  # retiro de poste provisional
+            "*090632": 0,  # arrastre en pendiente (excluyente con *090630)
+            "*090630": 0,  # arrastre en plano     (excluyente con *090632)
+            "*090471": 0,  # cambio de poste sin vereda
+            "*090470": 0,  # cambio de poste con vereda
+            "*090163": 0,  # traslado de cable autosoportado
         },
     },
     # Alumbrado de cabria. Sin cantidades: cada poste lleva lo suyo.
