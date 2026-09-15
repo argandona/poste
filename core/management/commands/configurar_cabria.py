@@ -27,6 +27,7 @@ TIPOS = [
     "Retenida Violin",
     "Ferreteria",
     "Otros cabria",
+    "Conexiones cabria",
 ]
 
 # Conectores de cuña que la ferretería usa y que no estaban en el catálogo.
@@ -43,6 +44,10 @@ MATERIALES_NUEVOS = {
                "P.CONDUCTOR DE COBRE 70 / 1,5 MM2",
     "5411072": "CONECTOR DE DERIVACION DE COBRE ESTAÑADO TP.CUÑA "
                "P.CONDUCTOR DE COBRE 35 / 1,5 - 2,5MM2",
+    "5411070": "CONECTOR DE DERIVACION DE COBRE ESTAÑADO TP.CUÑA "
+               "P.CONDUCTOR DE COBRE 70 / 16MM2",
+    "5111221": "EMPALME DERECHO DERIVACION UNIPOLAR AUTOFUNDENTE P.CABLE "
+               "SECO 6-120 / 10-120MM2 CONEX. TRIFASICA BT",
 }
 
 # Partida y precio. Sin precio la liquidación de esa partida sale en cero.
@@ -51,6 +56,8 @@ PARTIDAS_NUEVAS = {
                 "HASTA 120 mm2", "9.71"),
     "*090430": ("PORTALINEA DE PASO O REMATE DE 1 A 5 VIAS", "26.91"),
     "*090310": ("RETENIDA SIMPLE O VIOLIN MT O BT", "343.83"),
+    "*093043": ("TRASLADO DE CORONA 4 GANCHOS PARA ACOMETIDA "
+                "DOMICILIARIA", "58.45"),
 }
 
 # Partidas cuyo precio se fuerza. A diferencia de las de arriba, estas se
@@ -89,6 +96,32 @@ CATALOGO = {
     },
     # El cambio de poste con cabria. Casi todas las partidas se llenan solas o
     # se cargan a mano; ver las reglas en reglas_liquidacion.dart.
+    # Conexiones domiciliarias. Sin cantidades: cada poste lleva las suyas.
+    "Conexiones cabria": {
+        "materiales": {
+            "6933194": 0,  # caja de derivación y acometida  -> *093242
+            "6941188": 0,  # abrazadera tipo corona          -> *093045
+            "5023720": 0,  # cable CAAI-S 3x16
+            "1014213": 0,  # fleje de acero inoxidable
+            "1014308": 0,  # grapa o hebilla para el fleje
+            "5484220": 0,  # templador de acometida
+            "5484222": 0,  # templador de acometida trifásica
+            "5411524": 0,  # conector piercing
+            "5411050": 0,  # conector cuña 25-35 / 16-25
+            "5411052": 0,  # conector cuña 16/16, 25/10
+            "5411070": 0,  # conector cuña 70/16
+            "5111215": 0,  # empalme para un conector
+            "5111218": 0,  # empalme para dos conectores
+            "5111221": 0,  # empalme para tres conectores
+        },
+        "mano_de_obra": {
+            "*093242": 0,  # caja de distribución       (= 6933194)
+            "*093247": 0,  # traslado de caja           (se pregunta)
+            "*093045": 0,  # corona de 4 ganchos        (= 6941188)
+            "*093043": 0,  # traslado de corona         (se pregunta)
+            "*093081": 0,  # traslado de acometida      (se pregunta cuántas)
+        },
+    },
     "Poste cabria": {
         "materiales": {
             "5331596": 0,  # poste PRFV 7,5
