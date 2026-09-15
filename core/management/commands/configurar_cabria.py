@@ -32,6 +32,8 @@ TIPOS = [
 # Conectores de cuña que la ferretería usa y que no estaban en el catálogo.
 # Se crean sin precio: hay que cargárselo antes de liquidar con ellos.
 MATERIALES_NUEVOS = {
+    "5567145": "LUMINARIA LED TP.III,220V,60HZ,CL.II,SIN TELEG. 165W",
+    "5347095": "PASTORAL JP (5347095)",
     "5411060": "CONECTOR CUÑA TP UDC. REF. CU.70/35MM2",
     "5411063": "CONECTOR DE DERIVACION DE COBRE ESTAÑADO TP.CUÑA "
                "P.CONDUCTOR DE COBRE 70 / 70MM2",
@@ -72,6 +74,34 @@ CATALOGO = {
             "*090191": 1,  # colocación de cruceta o ménsula simple
             "*090060": 1,  # diagonal para cruceta
             "*090065": 1,  # abrazadera para perfil
+        },
+    },
+    # Alumbrado de cabria. Sin cantidades: cada poste lleva lo suyo.
+    "Alumbrado cabria": {
+        "materiales": {
+            "5411514": 0,  # conector piercing        -> *090810
+            "5411054": 0,  # conector cuña            -> *091608
+            "5411058": 0,  # conector de derivación   -> *091608
+            "5411078": 0,  # conector 70/1,5          -> *091608
+            "5411072": 0,  # conector 35/1,5-2,5      -> *091608
+            "5111215": 0,  # empalme autofundente
+            "5021407": 0,  # conductor bipolar (indoprene)
+            "6941274": 0,  # abrazadera para pastoral
+            "5347174": 0,  # pastoral                 -> *091346
+            "5347015": 0,  # pastoral bastón          -> *091346
+            "5347095": 0,  # pastoral JP              -> *091346
+            "5567146": 0,  # luminaria LED 90W        -> *091320
+            "5567145": 0,  # luminaria LED 165W       -> *091320
+        },
+        "mano_de_obra": {
+            "*091320": 0,  # luminaria o farola completa
+            "*091316": 0,  # retiro de luminaria   (sale del recupero)
+            "*091322": 0,  # traslado de luminaria (se pregunta)
+            "*091346": 0,  # pastoral simple
+            "*091357": 0,  # retiro de pastoral    (sale del recupero)
+            "*091356": 0,  # traslado de pastoral  (se pregunta)
+            "*091608": 0,  # empalme aéreo por conector
+            "*090810": 0,  # conector cualquier tipo
         },
     },
     # Ferretería no trae cantidades: se carga lo que se usó en cada poste.

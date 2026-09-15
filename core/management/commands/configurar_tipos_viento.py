@@ -63,6 +63,8 @@ DESCRIPCIONES_MANO_DE_OBRA = {
 # Nombres de obra con los que el capataz reconoce el material. Reemplazan a la
 # descripción larga del catálogo, que en dos pastorales era idéntica.
 DESCRIPCIONES = {
+    "5021407": "CONDUCTOR SOLIDO TWT 450/750V.BIPOLAR 2X1.5 MM2 (INDOPRENE)",
+    "5347015": "PASTORAL BASTON",
     "5347088": "PASTORAL JP",
     "5347206": "PASTORAL CHILENO CORTO",
     "5567146": "LUM.LED TP.IV,220V,60HZ,CL.II,SIN TELEG. 90W",
