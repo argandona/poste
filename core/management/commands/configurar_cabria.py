@@ -33,7 +33,7 @@ TIPOS = [
 # Se crean sin precio: hay que cargárselo antes de liquidar con ellos.
 MATERIALES_NUEVOS = {
     "5567145": "LUMINARIA LED TP.III,220V,60HZ,CL.II,SIN TELEG. 165W",
-    "5347095": "PASTORAL JP (5347095)",
+    "5347095": "PASTORAL JP",
     "5411060": "CONECTOR CUÑA TP UDC. REF. CU.70/35MM2",
     "5411063": "CONECTOR DE DERIVACION DE COBRE ESTAÑADO TP.CUÑA "
                "P.CONDUCTOR DE COBRE 70 / 70MM2",

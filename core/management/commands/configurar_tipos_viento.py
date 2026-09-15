@@ -27,10 +27,9 @@ TIPOS = {
             "5111215",  # empalme derecho autofundente
             "5021407",  # conductor sólido TWT bipolar
             "6941274",  # abrazadera para pastoral
-            "5347088",  # pastoral JP                       -> *091346
-            "5347206",  # pastoral chileno corto            -> *091346
-            "5347174",  # pastoral AC GO simple             -> *091346
-            "5347015",  # pastoral de acero galvanizado     -> *091346
+            "5347174",  # pastoral chileno corto            -> *091346
+            "5347015",  # pastoral bastón                   -> *091346
+            "5347095",  # pastoral JP                       -> *091346
             "5567146",  # luminaria LED 90W                 -> *091320
         ],
         "mano_de_obra": [
@@ -65,8 +64,8 @@ DESCRIPCIONES_MANO_DE_OBRA = {
 DESCRIPCIONES = {
     "5021407": "CONDUCTOR SOLIDO TWT 450/750V.BIPOLAR 2X1.5 MM2 (INDOPRENE)",
     "5347015": "PASTORAL BASTON",
-    "5347088": "PASTORAL JP",
-    "5347206": "PASTORAL CHILENO CORTO",
+    "5347095": "PASTORAL JP",
+    "5347174": "PASTORAL CHILENO CORTO",
     "5567146": "LUM.LED TP.IV,220V,60HZ,CL.II,SIN TELEG. 90W",
 }
 
