@@ -53,6 +53,15 @@ PARTIDAS_NUEVAS = {
     "*090310": ("RETENIDA SIMPLE O VIOLIN MT O BT", "343.83"),
 }
 
+# Partidas cuyo precio se fuerza. A diferencia de las de arriba, estas se
+# pisan aunque ya tengan precio: el que traía el catálogo no era el pactado.
+# La hora de operario importa porque de ella sale el traslado de cable
+# delgado: la app divide el monto por metro entre este precio.
+PRECIOS_FIJOS = {
+    "*010101": ("HORA DE OPERARIO (TRASLADO DE CABLES INACCESIBLE <=35MM)",
+                "19.73"),
+}
+
 # Tipo de trabajo → materiales y partidas con su cantidad inicial.
 CATALOGO = {
     "Otros cabria": {
@@ -277,6 +286,19 @@ class Command(BaseCommand):
                 obj.precio = precio
                 obj.save(update_fields=["precio"])
                 self.stdout.write(f"  Precio cargado: {partida} a {precio}")
+
+        for partida, (descripcion, precio) in PRECIOS_FIJOS.items():
+            obj, nueva = ManoDeObra.objects.get_or_create(
+                partida=partida,
+                defaults={"descripcion": descripcion, "precio": precio})
+            if nueva:
+                self.stdout.write(f"  Partida creada: {partida} a {precio}")
+            elif str(obj.precio) != precio:
+                anterior = obj.precio
+                obj.precio = precio
+                obj.save(update_fields=["precio"])
+                self.stdout.write(
+                    f"  Precio corregido: {partida} de {anterior} a {precio}")
 
     def _catalogo(self, tipo, config):
         """Deja el conjunto exacto, con sus cantidades iniciales."""
