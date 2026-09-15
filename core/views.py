@@ -34,14 +34,24 @@ INCLUSIONES_CONSOLIDADO = {
         },
     },
     'cambio de poste inacc. cabria aereo': {
-        # Sin paquete: aquí no se cuentan cambios de poste.
-        'paquete': [],
+        'paquete': ['*090470', '*090471'],
         'incluidos': {
+            '*090633': 100,   # acarreo para cimentación
+            '*091840': 2,     # rotura de vereda
+            '*091240': 1,     # subida a poste
             # Cada retenida, sea violín anclada o templador aéreo, ya trae
             # incluido su perno de anclaje: no se cobra dos veces si además
             # se liquidó en ferretería.
             '*090392': {'segun': ['*090310', '*090320'], 'cantidad': 1},
         },
+        # Grupos que comparten una misma cantidad incluida: el paquete trae
+        # dos empalmes, sin importar de cuál de los dos tipos, y una luminaria
+        # y un pastoral, se hayan instalado, retirado o trasladado.
+        'incluidos_grupo': [
+            {'partidas': ['*091608', '*090810'], 'cantidad': 2},
+            {'partidas': ['*091320', '*091316', '*091322'], 'cantidad': 1},
+            {'partidas': ['*091346', '*091357', '*091356'], 'cantidad': 1},
+        ],
     },
 }
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -1700,6 +1710,24 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
                 pe['real'] += real
                 pe['incl'] += incl
                 pe['cobra'] += cobra
+
+            # Grupos con cantidad compartida: el paquete incluye N unidades
+            # repartidas entre varias partidas, no N de cada una.
+            for grupo in (regla.get('incluidos_grupo') if regla else None) or []:
+                bolsa = num * Decimal(grupo['cantidad'])
+                for pc in grupo['partidas']:
+                    if bolsa <= 0:
+                        break
+                    info = g['partidas'].get(pc)
+                    if info is None:
+                        continue
+                    pe = agg['partidas'][pc]
+                    incl = min(info['cantidad'], bolsa)
+                    bolsa -= incl
+                    pe['incl'] += incl
+                    pe['cobra'] -= incl
+                    if pe['cobra'] < 0:
+                        pe['cobra'] = Decimal('0')
 
             # Derivación: excedente de acarreo (*090633 ÷ 6) → traslado manual (*090634).
             deriv = regla.get('derivar') if regla else None
