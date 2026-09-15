@@ -70,6 +70,21 @@ class ConfigurarCabriaTests(BaseAPITestCase):
             sorted(p.mano_de_obra.partida for p in tipo.partidas.all()),
             ["*010101", "*010213"])
 
+    def test_la_hora_de_operario_queda_al_precio_pactado(self):
+        # El catálogo la traía a otro precio y de ahí sale el traslado de
+        # cable delgado, así que el comando la corrige.
+        ManoDeObra.objects.create(
+            partida="*010101", descripcion="HORA DE OPERARIO", precio="18.79")
+        call_command("configurar_cabria", verbosity=0)
+        partida = ManoDeObra.objects.get(partida="*010101")
+        self.assertEqual(str(partida.precio), "19.73")
+
+    def test_correr_dos_veces_deja_el_mismo_precio(self):
+        call_command("configurar_cabria", verbosity=0)
+        call_command("configurar_cabria", verbosity=0)
+        self.assertEqual(
+            str(ManoDeObra.objects.get(partida="*010101").precio), "19.73")
+
     def test_avisa_de_lo_que_falta_en_el_catalogo(self):
         # Sin materiales en la base, el comando no revienta: los omite.
         call_command("configurar_cabria", verbosity=0)
@@ -97,8 +112,8 @@ class ConfigurarCabriaTests(BaseAPITestCase):
         tipo = TipoTrabajo.objects.create(nombre="Tipo hecho en la app")
         ActividadTipoTrabajo.objects.create(
             actividad=actividad, tipo_trabajo=tipo)
-        partida = ManoDeObra.objects.create(
-            partida="*010101", descripcion="HORA DE OPERARIO", precio="18.79")
+        # La hora de operario ya la dejó la corrida anterior.
+        partida = ManoDeObra.objects.get(partida="*010101")
         TipoTrabajoManoDeObra.objects.create(
             tipo_trabajo=tipo, mano_de_obra=partida)
         TipoTrabajoMaterial.objects.create(
