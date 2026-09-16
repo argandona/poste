@@ -81,6 +81,9 @@ class LoginView(APIView):
                 'email':       usuario.email,
                 'rol_id':      usuario.rol_id,
                 'rol':         usuario.rol.descripcion,
+                'rol_secundario_id': usuario.rol_secundario_id,
+                'rol_secundario': (usuario.rol_secundario.descripcion
+                                   if usuario.rol_secundario else None),
                 'empresa_id':  usuario.empresa_id,
                 'empresa':     usuario.empresa.nombre if usuario.empresa else None,
             }

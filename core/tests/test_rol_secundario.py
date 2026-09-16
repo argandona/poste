@@ -73,3 +73,30 @@ class RolSecundarioTests(BaseAPITestCase):
         token = CustomRefreshToken.for_usuario(self.doble)
         self.assertEqual(token["rol_id"], Rol.CAPATAZ)
         self.assertEqual(token["rol_secundario_id"], Rol.COORDINADOR)
+
+    def test_el_login_devuelve_los_dos_roles(self):
+        # La app arma sus módulos con lo que viene en el login.
+        import hashlib
+        self.doble.clave = hashlib.sha256(b"secreto").hexdigest()
+        self.doble.save(update_fields=["clave"])
+
+        r = self.client.post("/api/auth/login/",
+                             {"email": self.doble.email, "clave": "secreto"},
+                             format="json")
+
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["usuario"]["rol_id"], Rol.CAPATAZ)
+        self.assertEqual(r.data["usuario"]["rol_secundario_id"], Rol.COORDINADOR)
+        self.assertEqual(r.data["usuario"]["rol_secundario"], "Coordinador")
+
+    def test_sin_rol_secundario_el_login_lo_manda_vacio(self):
+        import hashlib
+        self.capataz.clave = hashlib.sha256(b"secreto").hexdigest()
+        self.capataz.save(update_fields=["clave"])
+
+        r = self.client.post("/api/auth/login/",
+                             {"email": self.capataz.email, "clave": "secreto"},
+                             format="json")
+
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertIsNone(r.data["usuario"]["rol_secundario_id"])
