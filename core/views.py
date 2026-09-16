@@ -544,17 +544,21 @@ class SSTViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def set_fecha_ejecucion(self, request):
-        """POST /api/ssts/set_fecha_ejecucion/  { sst_codigo, fecha }
-        Fija la fecha de ejecución de la SST (por código, en la empresa del usuario)."""
+        """POST /api/ssts/set_fecha_ejecucion/  { sst_codigo, fecha, hora? }
+        Fija la fecha de ejecución de la SST (por código, en la empresa del
+        usuario) y, si viene, la hora ('HH:MM'), que sale en el cuaderno de obra."""
         sst_codigo = (request.data.get('sst_codigo') or '').strip()
         fecha = request.data.get('fecha')  # 'YYYY-MM-DD' o null
+        cambios = {'fecha_ejecucion': fecha or None}
+        if 'hora' in request.data:
+            cambios['hora_ejecucion'] = request.data.get('hora') or None
         if not sst_codigo:
             return Response({'detail': 'sst_codigo es obligatorio.'}, status=400)
         empresa_id = getattr(request.user, 'empresa_id', None)
         qs = SST.objects.filter(codigo=sst_codigo)
         if empresa_id:
             qs = qs.filter(empresa_id=empresa_id)
-        n = qs.update(fecha_ejecucion=fecha or None)
+        n = qs.update(**cambios)
         if not n:
             return Response({'detail': 'No se encontró la SST.'}, status=404)
         return Response({'status': 'ok', 'sst_codigo': sst_codigo,
@@ -1664,6 +1668,94 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         liq = serializer.save()
         return Response(LiquidacionSuministroSerializer(liq).data, status=201)
+
+    def _sst_liquidada(self, request):
+        """La SST del parámetro ?sst=, con lo que se liquidó en ella. Sin
+        liquidaciones no hay nada que documentar."""
+        from .cuaderno_obra import reunir
+
+        codigo = (request.query_params.get('sst') or '').strip()
+        if not codigo:
+            raise ErrorNegocio('Se requiere el código de la SST.')
+        qs = SST.objects.filter(models.Q(codigo=codigo) | models.Q(sst=codigo))
+        empresa_id = getattr(request.user, 'empresa_id', None)
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        sst = qs.select_related('empresa', 'actividad').first()
+        if sst is None:
+            raise ErrorNegocio(f'No existe la SST {codigo}.')
+        datos = reunir(sst)
+        if not (datos.materiales or datos.partidas):
+            raise ErrorNegocio(f'La SST {codigo} todavía no tiene liquidación.')
+        return sst, datos
+
+    @action(detail=False, methods=['get'])
+    def cuaderno_obra(self, request):
+        """GET /api/liquidaciones/cuaderno_obra/?sst=<codigo>
+
+        El cuaderno de obra de la SST en PDF, redactado con lo liquidado y lo
+        dibujado en el plano. El número se le da la primera vez y se conserva."""
+        from django.db import IntegrityError
+        from django.http import HttpResponse
+
+        from .cuaderno_obra import generar_pdf_cuaderno, lineas_del_cuaderno
+        from .models import CuadernoObra
+
+        sst, datos = self._sst_liquidada(request)
+        codigo = sst.codigo or sst.sst
+        cuaderno = CuadernoObra.objects.filter(
+            empresa_id=sst.empresa_id, sst_codigo=codigo).first()
+        while cuaderno is None:
+            ultimo = (CuadernoObra.objects.filter(empresa_id=sst.empresa_id)
+                      .aggregate(n=models.Max('numero'))['n'] or 0)
+            try:
+                with transaction.atomic():
+                    cuaderno = CuadernoObra.objects.create(
+                        empresa_id=sst.empresa_id, sst_codigo=codigo,
+                        numero=ultimo + 1)
+            except IntegrityError:
+                # Otro lo generó a la vez: se toma el suyo o el número siguiente.
+                cuaderno = CuadernoObra.objects.filter(
+                    empresa_id=sst.empresa_id, sst_codigo=codigo).first()
+
+        pdf = generar_pdf_cuaderno({
+            'numero': f'{cuaderno.numero:06d}',
+            'sst': codigo,
+            'direccion': sst.distrito,
+            'distrito': sst.distrito,
+            'fecha': sst.fecha_ejecucion.strftime('%d/%m/%Y') if sst.fecha_ejecucion else '',
+            'hora': sst.hora_ejecucion.strftime('%H:%M') if sst.hora_ejecucion else '',
+            'encargado': datos.capataz,
+        }, lineas_del_cuaderno(datos))
+        resp = HttpResponse(pdf, content_type='application/pdf')
+        resp['Content-Disposition'] = f'attachment; filename="cuaderno_obra_{codigo}.pdf"'
+        return resp
+
+    @action(detail=False, methods=['get'])
+    def excel(self, request):
+        """GET /api/liquidaciones/excel/?sst=<codigo>
+
+        La liquidación de material y mano de obra de la SST en la plantilla
+        Excel de Tecsur."""
+        from django.http import HttpResponse
+
+        from .excel_liquidacion import generar_excel_liquidacion
+
+        sst, datos = self._sst_liquidada(request)
+        codigo = sst.codigo or sst.sst
+        contenido = generar_excel_liquidacion({
+            'sst': codigo,
+            'actividad': datos.actividad,
+            'distrito': sst.distrito,
+            'fecha': sst.fecha_ejecucion,
+            'contratista': sst.empresa.nombre if sst.empresa_id else '',
+            'capataz': datos.capataz,
+        }, datos.materiales, datos.partidas)
+        resp = HttpResponse(
+            contenido,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        resp['Content-Disposition'] = f'attachment; filename="liquidacion_{codigo}.xlsx"'
+        return resp
 
     @action(detail=False, methods=['get'])
     def consolidado(self, request):
