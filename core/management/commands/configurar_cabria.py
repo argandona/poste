@@ -18,16 +18,19 @@ from core.models import (
 
 ACTIVIDAD = "Cambio de poste inacc. cabria aereo"
 
+# El orden es el de la obra y es el que ve el capataz: primero el poste, al
+# final lo suelto. Cambiar esta lista cambia el orden en la app.
 TIPOS = [
-    "Alumbrado cabria",
     "Poste cabria",
-    "Mensula doble",
-    "Mensula simple",
+    "Alumbrado cabria",
+    "Ferreteria",
+    "Conexiones cabria",
     "Retenida simple",
     "Retenida Violin",
-    "Ferreteria",
+    "Mensula simple",
+    "Mensula doble",
+    'Retenida Tipo "Y"',
     "Otros cabria",
-    "Conexiones cabria",
 ]
 
 # Conectores de cuña que la ferretería usa y que no estaban en el catálogo.
@@ -281,10 +284,11 @@ class Command(BaseCommand):
         if nueva:
             self.stdout.write(f"Actividad creada: {ACTIVIDAD}")
 
-        for nombre in TIPOS:
+        for posicion, nombre in enumerate(TIPOS, start=1):
             tipo, _ = TipoTrabajo.objects.get_or_create(nombre=nombre)
-            ActividadTipoTrabajo.objects.get_or_create(
-                actividad=actividad, tipo_trabajo=tipo)
+            ActividadTipoTrabajo.objects.update_or_create(
+                actividad=actividad, tipo_trabajo=tipo,
+                defaults={"orden": posicion})
             if nombre in CATALOGO:
                 self._catalogo(tipo, CATALOGO[nombre])
 

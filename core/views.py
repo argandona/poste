@@ -1834,7 +1834,8 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
         atts = (ActividadTipoTrabajo.objects
                 .select_related('actividad', 'tipo_trabajo')
                 .prefetch_related('tipo_trabajo__partidas__mano_de_obra',
-                                  'tipo_trabajo__materiales__material'))
+                                  'tipo_trabajo__materiales__material')
+                .order_by('orden', 'tipo_trabajo__nombre'))
         actividad_map = {}
         for att in atts:
             nombre = att.actividad.nombre
@@ -2062,7 +2063,11 @@ class TipoTrabajoViewSet(viewsets.ModelViewSet):
               .order_by('nombre'))
         actividad = self.request.query_params.get('actividad')
         if actividad:
-            qs = qs.filter(actividades__actividad_id=actividad)
+            # Dentro de una actividad manda el orden de obra, no el alfabético.
+            from django.db.models import F
+            qs = (qs.filter(actividades__actividad_id=actividad)
+                    .annotate(_orden=F('actividades__orden'))
+                    .order_by('_orden', 'nombre'))
         return qs
 
     def create(self, request, *args, **kwargs):

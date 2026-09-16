@@ -709,9 +709,13 @@ class TipoTrabajoMaterial(models.Model):
 class ActividadTipoTrabajo(models.Model):
     actividad    = models.ForeignKey(Actividad,   on_delete=models.PROTECT, related_name='tipos_trabajo')
     tipo_trabajo = models.ForeignKey(TipoTrabajo, on_delete=models.PROTECT, related_name='actividades')
+    # En qué orden se le muestran al capataz. El orden es el de la obra: se
+    # empieza por el poste y se termina por lo suelto, no por el abecedario.
+    orden        = models.PositiveIntegerField(default=0)
     class Meta:
         db_table        = "actividad_tipo_trabajo"
         unique_together = (("actividad", "tipo_trabajo"),)
+        ordering        = ["orden", "tipo_trabajo__nombre"]
     def __str__(self):
         return f"{self.actividad} → {self.tipo_trabajo}"
 
