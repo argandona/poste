@@ -38,6 +38,9 @@ class Usuario(models.Model):
     id_usuario     = models.AutoField(primary_key=True)
     nombre         = models.CharField(max_length=150)
     rol            = models.ForeignKey(Rol, on_delete=models.PROTECT, related_name="usuarios")
+    # Un segundo sombrero. En obra hay gente que es capataz y coordinador a la
+    # vez, y con un solo rol tendria que entrar con dos cuentas distintas.
+    rol_secundario = models.ForeignKey(Rol, on_delete=models.PROTECT, related_name="usuarios_secundarios", null=True, blank=True)
     empresa        = models.ForeignKey("Empresa", on_delete=models.PROTECT, related_name="usuarios", null=True, blank=True)
     clave          = models.CharField(max_length=255)
     activo         = models.BooleanField(default=True)
@@ -47,23 +50,32 @@ class Usuario(models.Model):
     telefono       = models.CharField(max_length=20, blank=True)
     fcm_token      = models.CharField(max_length=500, blank=True, null=True)
 
-    def es_superadmin(self): return self.rol_id == Rol.SUPERADMIN
-    def es_admin_empresa(self): return self.rol_id == Rol.ADMIN_EMPRESA
-    def puede_hacer_pedido(self): return self.rol_id in (Rol.ENCARGADO, Rol.CAPATAZ)
-    def puede_hacer_devolucion(self): return self.rol_id in (Rol.ENCARGADO, Rol.CAPATAZ)
-    def puede_hacer_consumo(self): return self.rol_id in (Rol.LIQUIDADOR, Rol.ENCARGADO_ALMACEN)
-    def puede_aprobar_pedido(self): return self.rol_id in (Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
-    def puede_aprobar_devolucion(self): return self.rol_id in (Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
+    @property
+    def roles(self):
+        """Los roles que tiene puestos. Siempre el principal; el segundo si hay."""
+        return {self.rol_id, self.rol_secundario_id} - {None}
+
+    def _tiene(self, *roles): return bool(self.roles & set(roles))
+
+    def es_superadmin(self): return self._tiene(Rol.SUPERADMIN)
+    def es_admin_empresa(self): return self._tiene(Rol.ADMIN_EMPRESA)
+    def puede_hacer_pedido(self): return self._tiene(Rol.ENCARGADO, Rol.CAPATAZ)
+    def puede_hacer_devolucion(self): return self._tiene(Rol.ENCARGADO, Rol.CAPATAZ)
+    def puede_hacer_consumo(self): return self._tiene(Rol.LIQUIDADOR, Rol.ENCARGADO_ALMACEN)
+    def puede_aprobar_pedido(self): return self._tiene(Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
+    def puede_aprobar_devolucion(self): return self._tiene(Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
     # Conteo fisico de existencias. En TECSUR el Capataz inventaria su propio
     # camion (ver Inventario.clean), a diferencia de ENCOSSA.
-    def puede_hacer_inventario(self): return self.rol_id in (Rol.CAPATAZ, Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
+    def puede_hacer_inventario(self): return self._tiene(Rol.CAPATAZ, Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
     # Movimientos del almacen: ingresos de proveedor, devoluciones a Tecsur,
     # materiales malogrados y transferencias entre almacenes.
-    def puede_gestionar_almacen(self): return self.rol_id in (Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
-    def puede_gestionar_empresa(self): return self.rol_id in (Rol.ADMIN_EMPRESA, Rol.SUPERADMIN)
-    def puede_asignar_sst(self): return self.rol_id in (Rol.COORDINADOR, Rol.SUPERADMIN)
+    def puede_gestionar_almacen(self): return self._tiene(Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
+    def puede_gestionar_empresa(self): return self._tiene(Rol.ADMIN_EMPRESA, Rol.SUPERADMIN)
+    def puede_asignar_sst(self): return self._tiene(Rol.COORDINADOR, Rol.SUPERADMIN)
 
     def clean(self):
+        if self.rol_secundario_id and self.rol_secundario_id == self.rol_id:
+            raise ValidationError("El rol secundario tiene que ser distinto.")
         if self.rol_id == Rol.SUPERADMIN and self.empresa_id:
             raise ValidationError("El SuperAdmin no pertenece a ninguna empresa.")
         if self.rol_id != Rol.SUPERADMIN and not self.empresa_id:

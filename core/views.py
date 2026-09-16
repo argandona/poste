@@ -2,7 +2,15 @@ import datetime
 import unicodedata
 import openpyxl
 from decimal import Decimal
+from django.db.models import Q
 from django.utils import timezone
+
+
+def con_rol(*roles):
+    """Filtro de usuarios por rol, mirando el principal y el secundario.
+
+    Quien es capataz y coordinador a la vez tiene que salir en las dos listas."""
+    return Q(rol_id__in=roles) | Q(rol_secundario_id__in=roles)
 
 
 def _norm_txt(s):
@@ -884,7 +892,7 @@ class PedidoViewSet(viewsets.ModelViewSet):
         pedido = serializer.save()
         empresa_id = pedido.usuario.empresa_id
         tokens = list(
-            Usuario.objects.filter(rol_id=Rol.ENCARGADO_ALMACEN, empresa_id=empresa_id, activo=True)
+            Usuario.objects.filter(con_rol(Rol.ENCARGADO_ALMACEN), empresa_id=empresa_id, activo=True)
             .exclude(fcm_token__isnull=True).exclude(fcm_token='')
             .values_list('fcm_token', flat=True)
         )
@@ -905,7 +913,7 @@ class PedidoViewSet(viewsets.ModelViewSet):
             qs = qs.filter(camion_id=camion)
         try:
             usr = Usuario.objects.get(pk=self.request.user.id_usuario)
-            if usr.rol_id in (Rol.ENCARGADO, Rol.CAPATAZ):
+            if usr.puede_hacer_pedido():
                 qs = qs.filter(usuario_id=usr.pk)
         except (AttributeError, Usuario.DoesNotExist):
             pass
@@ -996,7 +1004,7 @@ class DevolucionViewSet(viewsets.ModelViewSet):
         devolucion = serializer.save()
         empresa_id = devolucion.usuario.empresa_id
         tokens = list(
-            Usuario.objects.filter(rol_id=Rol.ENCARGADO_ALMACEN, empresa_id=empresa_id, activo=True)
+            Usuario.objects.filter(con_rol(Rol.ENCARGADO_ALMACEN), empresa_id=empresa_id, activo=True)
             .exclude(fcm_token__isnull=True).exclude(fcm_token='')
             .values_list('fcm_token', flat=True)
         )
@@ -1014,7 +1022,7 @@ class DevolucionViewSet(viewsets.ModelViewSet):
             qs = qs.filter(estado=estado)
         try:
             usr = Usuario.objects.get(pk=self.request.user.id_usuario)
-            if usr.rol_id in (Rol.ENCARGADO, Rol.CAPATAZ):
+            if usr.puede_hacer_pedido():
                 qs = qs.filter(usuario_id=usr.pk)
         except (AttributeError, Usuario.DoesNotExist):
             pass
@@ -1579,7 +1587,7 @@ class RecuperoViewSet(viewsets.ModelViewSet):
 
         actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
         capataz = (Usuario.objects
-                   .filter(sst_encargados__sst=sst, rol_id=Rol.CAPATAZ)
+                   .filter(con_rol(Rol.CAPATAZ), sst_encargados__sst=sst)
                    .select_related('rol').first())
         if capataz is None:
             capataz = (Usuario.objects

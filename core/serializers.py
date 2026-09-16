@@ -36,13 +36,17 @@ class RolSerializer(serializers.ModelSerializer):
 # ── Usuario ─────────────────────────────────────
 class UsuarioSerializer(serializers.ModelSerializer):
     rol_descripcion    = serializers.CharField(source='rol.descripcion', read_only=True)
+    rol_secundario_descripcion = serializers.CharField(
+        source='rol_secundario.descripcion', read_only=True)
     empresa_nombre     = serializers.CharField(source='empresa.nombre',  read_only=True)
 
     class Meta:
         model  = Usuario
         fields = [
             'id_usuario','nombre','email','telefono',
-            'rol','rol_descripcion','empresa','empresa_nombre',
+            'rol','rol_descripcion',
+            'rol_secundario','rol_secundario_descripcion',
+            'empresa','empresa_nombre',
             'activo','fecha_creacion','ultimo_acceso',
         ]
         # clave nunca se expone en lectura
@@ -52,7 +56,8 @@ class UsuarioCreateSerializer(serializers.ModelSerializer):
     """Para crear/actualizar usuario con clave en texto plano (se hashea en el signal)."""
     class Meta:
         model  = Usuario
-        fields = ['nombre','email','telefono','rol','empresa','clave','activo']
+        fields = ['nombre','email','telefono','rol','rol_secundario',
+                  'empresa','clave','activo']
 
     def create(self, validated_data):
         import hashlib
