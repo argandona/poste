@@ -39,6 +39,7 @@ INCLUSIONES_CONSOLIDADO = {
             '*090633': 100,   # acarreo para cimentación
             '*091840': 2,     # rotura de vereda
             '*091240': 1,     # subida a poste
+            '*090238': 1,     # escalamiento: cambiar el poste ya lo incluye
             # Cada retenida, sea violín anclada o templador aéreo, ya trae
             # incluido su perno de anclaje: no se cobra dos veces si además
             # se liquidó en ferretería.

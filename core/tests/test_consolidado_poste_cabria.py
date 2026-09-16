@@ -35,7 +35,7 @@ class ConsolidadoPosteCabriaTests(BaseAPITestCase):
         for codigo, precio in [
             ("*090470", "1535.09"), ("*090471", "1312.57"),
             ("*090633", "0.67"), ("*091840", "119.73"), ("*091240", "251.40"),
-            ("*091608", "13.44"), ("*090810", "5.31"),
+            ("*091608", "13.44"), ("*090810", "5.31"), ("*090238", "24.92"),
             ("*091320", "86.97"), ("*091316", "60.88"), ("*091322", "113.06"),
             ("*091346", "113.35"), ("*091357", "79.34"), ("*091356", "147.35"),
         ]:
@@ -69,6 +69,26 @@ class ConsolidadoPosteCabriaTests(BaseAPITestCase):
     def test_el_cambio_incluye_cien_de_acarreo(self):
         self.liquidar(self.tipo_poste, {"*090470": 1, "*090633": 120})
         self.assertEqual(self.cobrado("*090633"), "20.00")
+
+    def test_el_cambio_incluye_un_escalamiento(self):
+        # Para cambiar el poste hay que subir igual, asi que el escalamiento
+        # que la ferreteria liquida aparte ya viene dentro del paquete.
+        self.liquidar(self.tipo_poste, {"*090470": 1})
+        self.liquidar(self.tipo_alumbrado, {"*090238": 1})
+        self.assertEqual(self.cobrado("*090238"), "0.00")
+
+    def test_el_segundo_escalamiento_si_se_cobra(self):
+        self.liquidar(self.tipo_poste, {"*090470": 1})
+        self.liquidar(self.tipo_alumbrado, {"*090238": 3})
+        self.assertEqual(self.cobrado("*090238"), "2.00")
+
+    def test_sin_cambio_de_poste_el_escalamiento_se_cobra_entero(self):
+        self.liquidar(self.tipo_alumbrado, {"*090238": 2})
+        self.assertEqual(self.cobrado("*090238"), "2.00")
+
+    def test_el_cambio_sin_vereda_tambien_incluye_el_escalamiento(self):
+        self.liquidar(self.tipo_poste, {"*090471": 1, "*090238": 1})
+        self.assertEqual(self.cobrado("*090238"), "0.00")
 
     def test_el_cambio_incluye_dos_roturas_de_vereda(self):
         self.liquidar(self.tipo_poste, {"*090470": 1, "*091840": 3})
