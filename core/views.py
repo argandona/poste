@@ -439,6 +439,21 @@ class SSTViewSet(viewsets.ModelViewSet):
         ]
         return Response(data)
 
+    @staticmethod
+    def _tiene_liquidaciones(sst):
+        """Si la SST ya tiene mano de obra liquidada, su actividad no se toca.
+
+        Las reglas del consolidado dependen de la actividad, así que cambiarla
+        después dejaría lo ya liquidado con tipos de trabajo de otra actividad
+        y los descuentos saldrían mal."""
+        if sst.codigo and LiquidacionSuministro.objects.filter(
+                sst_externo=sst.codigo).exists():
+            return True
+        ids = (SSTSuministro.objects.filter(sst=sst)
+               .values_list('suministro_id', flat=True))
+        return LiquidacionSuministro.objects.filter(
+            suministro_id__in=list(ids)).exists()
+
     @action(detail=True, methods=['post'])
     def asignar(self, request, pk=None):
         """POST /api/ssts/<id>/asignar/  { usuario, suministros: [id_suministro,...] }
@@ -502,9 +517,20 @@ class SSTViewSet(viewsets.ModelViewSet):
         qs = SST.objects.filter(codigo=sst_codigo)
         if empresa_id:
             qs = qs.filter(empresa_id=empresa_id)
-        actualizadas = qs.update(actividad_id=actividad_id)
-        if not actualizadas:
+        ssts = list(qs)
+        if not ssts:
             return Response({'detail': 'No se encontró la SST.'}, status=404)
+        actualizadas = 0
+        for sst in ssts:
+            if sst.actividad_id == int(actividad_id):
+                continue  # ya la tiene: no hay nada que cambiar
+            if self._tiene_liquidaciones(sst):
+                return Response(
+                    {'detail': 'La SST ya tiene liquidaciones: su actividad '
+                               'no se puede cambiar.'}, status=400)
+            sst.actividad_id = actividad_id
+            sst.save(update_fields=['actividad'])
+            actualizadas += 1
         return Response({'status': 'ok', 'sst_codigo': sst_codigo,
                          'actividad': actividad_id, 'ssts_actualizadas': actualizadas})
 
@@ -543,6 +569,7 @@ class SSTViewSet(viewsets.ModelViewSet):
         numero = (request.data.get('numero_suministro') or '').strip()
         usuario_id = request.data.get('usuario')
         distrito = (request.data.get('distrito') or '').strip()
+        actividad_id = request.data.get('actividad')  # opcional
 
         if not sst_codigo or not numero or not usuario_id:
             return Response(
@@ -572,11 +599,21 @@ class SSTViewSet(viewsets.ModelViewSet):
                 defaults={'asignado_a': capataz},
             )
             SSTEncargado.objects.get_or_create(sst=sst, usuario=capataz)
+            # La actividad decide qué tipos de trabajo verá el capataz. Es
+            # dato del coordinador, pero si ya se liquidó algo no se toca.
+            if actividad_id and sst.actividad_id != int(actividad_id):
+                if self._tiene_liquidaciones(sst):
+                    raise ErrorNegocio(
+                        'La SST ya tiene liquidaciones: su actividad no se '
+                        'puede cambiar.')
+                sst.actividad_id = actividad_id
+                sst.save(update_fields=['actividad'])
 
         return Response({
             'status': 'ok',
             'sst': sst.codigo,
             'sst_creada': sst_nuevo,
+            'actividad': sst.actividad_id,
             'poste': sum_obj.numero_suministro,
             'poste_creado': sum_nuevo,
             'capataz': capataz.nombre,
@@ -1808,6 +1845,17 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
         # Todos los suministros ASIGNADOS pendientes de liquidar (sin filtro de semana)
         suministros = _suministros_asignados_usuario(usuario)
 
+        # La actividad que puso el coordinador manda sobre la que trae el
+        # proyecto externo: es la que está escrita con los nombres de este
+        # catálogo, así que es la que encuentra los tipos de trabajo.
+        codigos = {s.get('sst_codigo') for s in suministros if s.get('sst_codigo')}
+        actividad_local = {
+            codigo: nombre
+            for codigo, nombre in SST.objects
+            .filter(codigo__in=codigos, actividad__isnull=False)
+            .values_list('codigo', 'actividad__nombre')
+        }
+
         # Agrupar por día
         dias = {}
         for s in suministros:
@@ -1817,7 +1865,8 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
 
             # Enriquecer con tipos de trabajo según actividad
             actividad_data  = s.get('actividad') or {}
-            actividad_nombre = actividad_data.get('nombre_actividad', '')
+            actividad_nombre = (actividad_local.get(s.get('sst_codigo'))
+                                or actividad_data.get('nombre_actividad', ''))
             tipos_trabajo = []
             for tt in actividad_map.get(actividad_nombre, []):
                 tipos_trabajo.append({
@@ -1842,7 +1891,11 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
                     ],
                 })
 
-            dias[fecha_str].append({**s, 'tipos_trabajo_disponibles': tipos_trabajo})
+            dias[fecha_str].append({
+                **s,
+                'actividad_nombre': actividad_nombre,
+                'tipos_trabajo_disponibles': tipos_trabajo,
+            })
 
         # Convertir a lista ordenada por fecha
         resultado = [
