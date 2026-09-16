@@ -629,6 +629,8 @@ class LiquidacionSuministroCreateSerializer(serializers.Serializer):
     usuario             = serializers.PrimaryKeyRelatedField(queryset=Usuario.objects.all())
     tipo_trabajo        = serializers.PrimaryKeyRelatedField(queryset=TipoTrabajo.objects.all())
     observacion         = serializers.CharField(required=False, allow_blank=True, default='')
+    # Lo propio del tipo de trabajo (p. ej. suministros trasladados), aparte.
+    comentario          = serializers.CharField(required=False, allow_blank=True, default='')
     partidas            = LiquidacionPartidaCreateSerializer(many=True)
     materiales          = ConsumoMaterialCreateSerializer(many=True, required=False, default=list)
     # Estado a fijar en Render: EJECUTADO (liquida MO + materiales) o DEVUELTO (solo MO)

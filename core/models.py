@@ -235,6 +235,8 @@ class SST(models.Model):
     fecha_inicio  = models.DateField(null=True, blank=True)
     fecha_termino = models.DateField(null=True, blank=True)
     fecha_ejecucion = models.DateField(null=True, blank=True)
+    # La hora sale en el cuaderno de obra junto con la fecha de ejecución.
+    hora_ejecucion  = models.TimeField(null=True, blank=True)
     monto_sst     = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     class Meta:
         db_table = "sst"
@@ -759,6 +761,10 @@ class LiquidacionSuministro(models.Model):
     tipo_trabajo        = models.ForeignKey(TipoTrabajo, on_delete=models.PROTECT, related_name="liquidaciones")
     fecha               = models.DateField(auto_now_add=True)
     observacion         = models.TextField(blank=True)
+    # Lo que el tipo de trabajo pidió anotar aparte, sin la observación general:
+    # por ejemplo los suministros de las conexiones trasladadas, que van tal
+    # cual al cuaderno de obra.
+    comentario          = models.TextField(blank=True)
     class Meta:
         db_table = "liquidacion_suministro"
     def __str__(self):
@@ -815,6 +821,24 @@ class ConsumoMaterialSuministro(models.Model):
         db_table = "consumo_material_suministro"
     def __str__(self):
         return f"{self.suministro} – {self.material} x{self.cantidad}"
+
+
+class CuadernoObra(models.Model):
+    """Número correlativo del cuaderno de obra de una SST.
+
+    El formato impreso trae su número; aquí se lo da el sistema, uno por SST y
+    por empresa. Se fija la primera vez que se genera y no cambia al volver a
+    descargarlo, para que el papel y el sistema digan lo mismo."""
+    id_cuaderno = models.AutoField(primary_key=True)
+    empresa     = models.ForeignKey(Empresa, on_delete=models.PROTECT, related_name="cuadernos")
+    sst_codigo  = models.CharField(max_length=20)
+    numero      = models.PositiveIntegerField()
+    fecha       = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        db_table = "cuaderno_obra"
+        unique_together = (("empresa", "sst_codigo"), ("empresa", "numero"))
+    def __str__(self):
+        return f"C.O. {self.numero:06d} – SST {self.sst_codigo}"
 
 
 class PlanoSST(models.Model):
