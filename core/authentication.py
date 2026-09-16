@@ -21,6 +21,7 @@ class CustomRefreshToken(RefreshToken):
         token['email']       = usuario.email
         token['nombre']      = usuario.nombre
         token['rol_id']      = usuario.rol_id
+        token['rol_secundario_id'] = usuario.rol_secundario_id
         token['empresa_id']  = usuario.empresa_id
         return token
 
