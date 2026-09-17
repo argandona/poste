@@ -79,6 +79,22 @@ CATALOGO = {
         "mano_de_obra": {
             "*010101": 0,  # hora de operario: se carga según lo trabajado
             "*010213": 0,  # traslado de cables de comunicación
+            # Retiros: la app los llena con lo cargado en Recupero.
+            "*090139": 0,  # retiro cable 10-25 mm2      <- CAAIS 3x16(+1x16)
+            "*090138": 0,  # retiro cable 25-50 mm2      <- CAAIS 3x35+1x16
+            "*091411": 0,  # retiro cable NYY            <- NYY 2-1x6
+            "*091448": 0,  # retiro cable NYBY - NKY     <- NKY 2x6
+            "*090491": 0,  # retiro poste acero < 7      <- poste fierro 6.4
+            "*090497": 0,  # retiro poste acero > 7      <- poste fierro 7
+            "*093241": 0,  # retiro caja de distribución <- caja de derivación
+            "*093044": 0,  # retiro corona 4 ganchos     <- abrazadera corona
+            "*090189": 0,  # retiro ménsula simple       <- ménsula suelta
+            "*098669": 0,  # retiro ménsula doble        <- ménsulas de a dos
+            "*090061": 0,  # retiro diagonal             <- diagonal
+            "*090064": 0,  # retiro abrazadera de perfil <- abrazadera 4 pernos
+            "*090391": 0,  # retiro perno de anclaje     <- pernos
+            "*090395": 0,  # retiro punto de fijación    <- grapas
+            "*090319": 0,  # retiro retenida-templador   <- cable acerado
         },
     },
     "Mensula simple": {
