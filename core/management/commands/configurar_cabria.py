@@ -30,7 +30,7 @@ TIPOS = [
     "Mensula simple",
     "Mensula doble",
     'Retenida Tipo "Y"',
-    "Otros cabria",
+    "Retiros - otros - cabria",
 ]
 
 # Conectores de cuña que la ferretería usa y que no estaban en el catálogo.
@@ -74,7 +74,7 @@ PRECIOS_FIJOS = {
 
 # Tipo de trabajo → materiales y partidas con su cantidad inicial.
 CATALOGO = {
-    "Otros cabria": {
+    "Retiros - otros - cabria": {
         "materiales": {},
         "mano_de_obra": {
             "*010101": 0,  # hora de operario: se carga según lo trabajado

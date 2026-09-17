@@ -61,10 +61,10 @@ class ConfigurarCabriaTests(BaseAPITestCase):
         self.assertEqual(por_matricula["5335110"], 2)
         self.assertEqual(por_matricula["5461238"], 14)
 
-    def test_otros_cabria_es_solo_mano_de_obra(self):
+    def test_retiros_otros_cabria_es_solo_mano_de_obra(self):
         self._catalogo_completo()
         call_command("configurar_cabria", verbosity=0)
-        tipo = TipoTrabajo.objects.get(nombre="Otros cabria")
+        tipo = TipoTrabajo.objects.get(nombre="Retiros - otros - cabria")
         self.assertEqual(tipo.materiales.count(), 0)
         # La hora de operario, el traslado de cables de comunicación y los
         # retiros que la app llena con lo recuperado.
