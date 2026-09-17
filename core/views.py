@@ -1750,7 +1750,7 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
             'fecha': sst.fecha_ejecucion,
             'contratista': sst.empresa.nombre if sst.empresa_id else '',
             'capataz': datos.capataz,
-        }, datos.materiales, datos.partidas)
+        }, datos.materiales, datos.partidas, datos.elementos_plano)
         resp = HttpResponse(
             contenido,
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
