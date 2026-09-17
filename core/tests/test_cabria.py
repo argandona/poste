@@ -66,9 +66,14 @@ class ConfigurarCabriaTests(BaseAPITestCase):
         call_command("configurar_cabria", verbosity=0)
         tipo = TipoTrabajo.objects.get(nombre="Otros cabria")
         self.assertEqual(tipo.materiales.count(), 0)
+        # La hora de operario, el traslado de cables de comunicación y los
+        # retiros que la app llena con lo recuperado.
         self.assertEqual(
             sorted(p.mano_de_obra.partida for p in tipo.partidas.all()),
-            ["*010101", "*010213"])
+            sorted(["*010101", "*010213",
+                    "*090139", "*090138", "*091411", "*091448", "*090491",
+                    "*090497", "*093241", "*093044", "*090189", "*098669",
+                    "*090061", "*090064", "*090391", "*090395", "*090319"]))
 
     def test_conexiones_cabria_queda_con_su_catalogo(self):
         self._catalogo_completo()

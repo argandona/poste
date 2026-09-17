@@ -148,7 +148,7 @@ def _lista(items):
 # en el material (lo instalado). El catálogo de recupero se escribe a mano, así
 # que se busca por texto y con sus variantes.
 CAMBIOS = [
-    ('luminaria', ('luminaria', 'farola', 'falora'), (), ('luminaria',), ()),
+    ('luminaria', ('luminaria', 'farola', 'falora', 'lampara'), (), ('luminaria',), ()),
     ('pastoral', ('pastoral',), ('abrazadera',), ('pastoral',), ('abrazadera',)),
     ('caja de distribución', ('caja',), (), ('caja',), ()),
     ('abrazadera tipo corona con ganchos', ('corona',), (), ('gancho',), ()),
