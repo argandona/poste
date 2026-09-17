@@ -106,6 +106,20 @@ class LineasDelCuadernoTests(BaseAPITestCase):
                       'o escalera', lineas)
         self.assertIn('Arrastre de poste 8.5 metros', lineas)
 
+    def test_cables_de_comunicacion_una_sola_vez(self):
+        comunicacion = {'tipo': 'cable', 'estado': 'C', 'metros': 0}
+        lineas = lineas_del_cuaderno(Liquidado(
+            elementos_plano=[comunicacion, dict(comunicacion)]))
+        self.assertEqual(lineas.count('Se trasladó cables de comunicación'), 1)
+
+    def test_sin_cables_de_comunicacion_no_se_escribe(self):
+        lineas = lineas_del_cuaderno(Liquidado(elementos_plano=[
+            {'tipo': 'cable', 'estado': 'T', 'descripcion': 'Caais 3x35',
+             'metros': 10},
+            {'tipo': 'cable', 'estado': 'A', 'metros': 5},
+        ]))
+        self.assertNotIn('Se trasladó cables de comunicación', lineas)
+
     def test_suministros_trasladados(self):
         d = Liquidado(partidas=[item('x', 2, '*093081')],
                       conexiones=['1234567, 7654321'])
