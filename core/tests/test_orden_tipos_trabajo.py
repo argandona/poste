@@ -21,7 +21,7 @@ ESPERADO = [
     "Mensula simple",
     "Mensula doble",
     'Retenida Tipo "Y"',
-    "Otros cabria",
+    "Retiros - otros - cabria",
 ]
 
 
