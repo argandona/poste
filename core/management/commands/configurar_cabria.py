@@ -255,6 +255,26 @@ CATALOGO = {
             "*090320": 0,  # retenida-templador aéreo: sin anclaje a tierra
         },
     },
+    # Retenida tipo "Y": dos vientos, así que lleva el doble de cable, amarres
+    # y aisladores que la violín. El anclaje al piso decide las partidas.
+    'Retenida Tipo "Y"': {
+        "materiales": {
+            "1014213": 2,   # fleje de acero inoxidable
+            "1014308": 2,   # grapa o hebilla para el fleje
+            "5016361": 18,  # cable de acero para retenida
+            "5419120": 8,   # amarre preformado
+            "5217631": 2,   # aislador de tensión
+            "5467804": 1,   # brazo de apoyo tipo violín
+            "5467624": 1,   # canaleta protectora
+            "5464101": 2,   # eslabón angular
+            "5329301": 1,   # zapata de concreto   -> *090310
+            "5467101": 1,   # barra con ojo        -> *090310
+        },
+        "mano_de_obra": {
+            "*090310": 0,  # retenida simple o violín: anclada a tierra
+            "*090320": 0,  # retenida-templador aéreo
+        },
+    },
     "Mensula doble": {
         "materiales": {
             "5461238": 14,

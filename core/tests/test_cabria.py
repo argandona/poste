@@ -139,9 +139,9 @@ class ConfigurarCabriaTests(BaseAPITestCase):
         self.assertEqual(tipo.partidas.count(), 1)
         self.assertEqual(tipo.materiales.count(), 1)
 
-    # Estos nacen vacíos a propósito: el coordinador los arma desde la
-    # pantalla de Configuración y el comando no los toca.
-    SIN_CATALOGO = {'Retenida Tipo "Y"'}
+    # Los que nacerían vacíos a propósito, para que el coordinador los arme
+    # desde la pantalla de Configuración. Hoy todos tienen catálogo.
+    SIN_CATALOGO = set()
 
     def test_todos_los_tipos_tienen_su_catalogo_definido(self):
         # Si alguno se queda fuera sin querer, nace vacío y nadie se entera.
