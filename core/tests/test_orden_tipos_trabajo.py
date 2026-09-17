@@ -53,13 +53,19 @@ class OrdenTiposTrabajoTests(BaseAPITestCase):
         actividad = Actividad.objects.get(nombre=ACTIVIDAD)
         self.assertEqual(self.nombres_del_api(actividad), ESPERADO)
 
-    def test_la_retenida_en_y_se_crea_vacia(self):
-        # Se crea para que el coordinador la arme desde Configuración; el
-        # comando no le inventa materiales ni partidas.
+    def test_la_retenida_en_y_trae_sus_partidas(self):
+        # Ya no nace vacía: el comando le deja las dos partidas de retenida.
+        # En la base de prueba solo existe *090310, que el comando crea; la
+        # *090320 viene del catálogo cargado aparte.
+        from ..models import ManoDeObra
+        ManoDeObra.objects.create(
+            partida="*090320", descripcion="RETENIDA-TEMPLADOR AEREO MT Y BT.",
+            precio="83.38")
         call_command("configurar_cabria", verbosity=0)
         tipo = TipoTrabajo.objects.get(nombre='Retenida Tipo "Y"')
-        self.assertEqual(tipo.materiales.count(), 0)
-        self.assertEqual(tipo.partidas.count(), 0)
+        self.assertEqual(
+            sorted(tipo.partidas.values_list("mano_de_obra__partida", flat=True)),
+            ["*090310", "*090320"])
 
     def test_un_tipo_agregado_a_mano_no_se_pierde(self):
         call_command("configurar_cabria", verbosity=0)
