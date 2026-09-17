@@ -87,7 +87,7 @@ class ConfigurarCabriaTests(BaseAPITestCase):
     def test_el_traslado_de_corona_se_crea_con_su_precio(self):
         call_command("configurar_cabria", verbosity=0)
         partida = ManoDeObra.objects.get(partida="*093043")
-        self.assertEqual(str(partida.precio), "58.45")
+        self.assertEqual(str(partida.precio), "10.32")
         self.assertIn("CORONA", partida.descripcion)
 
     def test_la_hora_de_operario_queda_al_precio_pactado(self):
@@ -107,6 +107,46 @@ class ConfigurarCabriaTests(BaseAPITestCase):
         call_command("configurar_cabria", verbosity=0)
         self.assertEqual(
             str(ManoDeObra.objects.get(partida="*010213").precio), "210.04")
+
+    def test_el_traslado_de_corona_se_corrige_con_el_del_excel(self):
+        # Se había creado a 58.45, copiando el traslado de caja.
+        ManoDeObra.objects.create(
+            partida="*093043", precio="58.45",
+            descripcion="TRASLADO DE CORONA 4 GANCHOS PARA ACOMETIDA "
+                        "DOMICILIARIA")
+        call_command("configurar_cabria", verbosity=0)
+        partida = ManoDeObra.objects.get(partida="*093043")
+        self.assertEqual(str(partida.precio), "10.32")
+        self.assertEqual(partida.descripcion,
+                         "TRASLADO DE ABRAZADERA TIPO CORONA CON GANCHOS")
+
+    def test_los_materiales_que_faltan_nacen_a_uno(self):
+        call_command("configurar_cabria", verbosity=0)
+        self.assertEqual(
+            str(Material.objects.get(matricula="5347095").precio), "1.00")
+
+    def test_un_material_que_quedo_en_cero_pasa_a_uno(self):
+        Material.objects.create(
+            matricula="5347095", descripcion="PASTORAL JP", precio=0)
+        call_command("configurar_cabria", verbosity=0)
+        self.assertEqual(
+            str(Material.objects.get(matricula="5347095").precio), "1.00")
+
+    def test_no_pisa_el_precio_real_de_un_material_ya_cargado(self):
+        Material.objects.create(
+            matricula="5347095", descripcion="PASTORAL JP", precio="87.50")
+        call_command("configurar_cabria", verbosity=0)
+        self.assertEqual(
+            str(Material.objects.get(matricula="5347095").precio), "87.50")
+
+    def test_la_rotura_de_vereda_queda_al_precio_del_excel(self):
+        # El catálogo la traía a 119.73, casi lo mismo que repararla.
+        ManoDeObra.objects.create(
+            partida="*091840", precio="119.73",
+            descripcion="ROTURA DE VEREDA CUALQUIER ESPESOR S/MAQ.CORTADORA")
+        call_command("configurar_cabria", verbosity=0)
+        self.assertEqual(
+            str(ManoDeObra.objects.get(partida="*091840").precio), "24.55")
 
     def test_la_descripcion_del_traslado_de_comunicacion_se_corrige(self):
         ManoDeObra.objects.create(

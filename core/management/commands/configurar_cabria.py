@@ -33,8 +33,12 @@ TIPOS = [
     "Retiros - otros - cabria",
 ]
 
+# Precio de paso de los materiales que el catálogo no trae. A cero no se
+# liquidan; a 1 salen en la liquidación y se ve que les falta el precio real.
+PRECIO_DE_PASO = "1.00"
+
 # Conectores de cuña que la ferretería usa y que no estaban en el catálogo.
-# Se crean sin precio: hay que cargárselo antes de liquidar con ellos.
+# Se crean a PRECIO_DE_PASO: hay que cargarles el precio real.
 MATERIALES_NUEVOS = {
     "5567145": "LUMINARIA LED TP.III,220V,60HZ,CL.II,SIN TELEG. 165W",
     "5347095": "PASTORAL JP",
@@ -59,20 +63,25 @@ PARTIDAS_NUEVAS = {
                 "HASTA 120 mm2", "9.71"),
     "*090430": ("PORTALINEA DE PASO O REMATE DE 1 A 5 VIAS", "26.91"),
     "*090310": ("RETENIDA SIMPLE O VIOLIN MT O BT", "343.83"),
-    "*093043": ("TRASLADO DE CORONA 4 GANCHOS PARA ACOMETIDA "
-                "DOMICILIARIA", "58.45"),
 }
 
-# Partidas cuyo precio se fuerza. A diferencia de las de arriba, estas se
-# pisan aunque ya tengan precio: el que traía el catálogo no era el pactado.
+# Partidas cuyo precio y nombre se fuerzan. A diferencia de las de arriba,
+# estas se pisan aunque ya tengan precio: lo que traía el catálogo no era lo
+# pactado, y una corrida vieja pudo dejar otro precio.
 # La hora de operario importa porque de ella sale el traslado de cable
 # delgado: la app divide el monto por metro entre este precio.
-# El traslado de cables de comunicación venía como hora de cuadrilla con grúa
-# a 201.04; lo pactado es 210.04.
+# El traslado de cables de comunicación venía como hora de cuadrilla con grúa.
+# Ojo: Liquidacion.xls lo trae a 201.04, pero lo pactado es 210.04 y manda
+# esto (confirmado por el usuario el 2026-09-17). La rotura de vereda salía a
+# 119.73, casi lo mismo que repararla, y el pactado es el del Excel.
 PRECIOS_FIJOS = {
     "*010101": ("HORA DE OPERARIO (TRASLADO DE CABLES INACCESIBLE <=35MM)",
                 "19.73"),
     "*010213": ("TRASLADO DE CABLES DE COMUNICACION", "210.04"),
+    "*091840": ("ROTURA DE VEREDA CUALQUIER ESPESOR S/MAQ.CORTADORA",
+                "24.55"),
+    # Se había creado a 58.45, copiando el traslado de caja.
+    "*093043": ("TRASLADO DE ABRAZADERA TIPO CORONA CON GANCHOS", "10.32"),
 }
 
 # Tipo de trabajo → materiales y partidas con su cantidad inicial.
@@ -338,16 +347,22 @@ class Command(BaseCommand):
     def _crear_lo_que_falta(self):
         """Da de alta lo que la actividad usa y el catálogo no tenía.
 
-        Nacen sin precio, así que se avisa: sin precio, la liquidación de esa
-        partida sale en cero.
+        Los materiales nacen a 1 y no a cero, porque a cero no se liquidan.
+        Es un precio de paso: hay que cargarles el real.
         """
         for matricula, descripcion in MATERIALES_NUEVOS.items():
-            _, nuevo = Material.objects.get_or_create(
+            obj, nuevo = Material.objects.get_or_create(
                 matricula=matricula,
-                defaults={"descripcion": descripcion, "precio": 0})
+                defaults={"descripcion": descripcion, "precio": PRECIO_DE_PASO})
             if nuevo:
                 self.stdout.write(self.style.WARNING(
-                    f"  Material creado SIN PRECIO: {matricula}"))
+                    f"  Material creado a {PRECIO_DE_PASO}: {matricula}"))
+            elif not obj.precio:
+                # Lo dejó a cero una corrida anterior.
+                obj.precio = PRECIO_DE_PASO
+                obj.save(update_fields=["precio"])
+                self.stdout.write(self.style.WARNING(
+                    f"  Material a {PRECIO_DE_PASO}: {matricula}"))
         for partida, (descripcion, precio) in PARTIDAS_NUEVAS.items():
             obj, nueva = ManoDeObra.objects.get_or_create(
                 partida=partida,
@@ -369,12 +384,18 @@ class Command(BaseCommand):
                 defaults={"descripcion": descripcion, "precio": precio})
             if nueva:
                 self.stdout.write(f"  Partida creada: {partida} a {precio}")
-            elif str(obj.precio) != precio:
-                anterior = obj.precio
+                continue
+            cambios = []
+            if str(obj.precio) != precio:
+                cambios.append(f"precio de {obj.precio} a {precio}")
                 obj.precio = precio
-                obj.save(update_fields=["precio"])
+            if obj.descripcion != descripcion:
+                cambios.append(f"nombre a {descripcion}")
+                obj.descripcion = descripcion
+            if cambios:
+                obj.save(update_fields=["precio", "descripcion"])
                 self.stdout.write(
-                    f"  Precio corregido: {partida} de {anterior} a {precio}")
+                    f"  {partida} corregida: {'; '.join(cambios)}")
 
     def _catalogo(self, tipo, config):
         """Deja el conjunto exacto, con sus cantidades iniciales."""
