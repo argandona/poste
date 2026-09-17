@@ -99,6 +99,24 @@ class ConfigurarCabriaTests(BaseAPITestCase):
         partida = ManoDeObra.objects.get(partida="*010101")
         self.assertEqual(str(partida.precio), "19.73")
 
+    def test_el_traslado_de_cables_de_comunicacion_queda_a_210_04(self):
+        # En el catálogo venía como hora de cuadrilla con grúa a 201.04.
+        ManoDeObra.objects.create(
+            partida="*010213", precio="201.04",
+            descripcion="HORA DE CUADRILLA DE MANTENIMIENTO CON GRUA DE 9 TN")
+        call_command("configurar_cabria", verbosity=0)
+        self.assertEqual(
+            str(ManoDeObra.objects.get(partida="*010213").precio), "210.04")
+
+    def test_la_descripcion_del_traslado_de_comunicacion_se_corrige(self):
+        ManoDeObra.objects.create(
+            partida="*010213", precio="201.04",
+            descripcion="HORA DE CUADRILLA DE MANTENIMIENTO CON GRUA DE 9 TN")
+        call_command("configurar_tipos_viento", verbosity=0)
+        self.assertEqual(
+            ManoDeObra.objects.get(partida="*010213").descripcion,
+            "TRASLADO DE CABLES DE COMUNICACION")
+
     def test_correr_dos_veces_deja_el_mismo_precio(self):
         call_command("configurar_cabria", verbosity=0)
         call_command("configurar_cabria", verbosity=0)

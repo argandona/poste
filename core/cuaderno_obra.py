@@ -202,6 +202,10 @@ def lineas_del_cuaderno(d):
             if e.get('pendiente') is True:
                 texto += ' en zona de pendiente mayor a 30° o escalera'
             lineas.append(texto)
+    # Los cables de comunicación no tienen metros: con que haya uno en el plano
+    # se escribe una vez, igual que su partida vale 1.
+    if any(e.get('estado') == 'C' for e in tramos):
+        lineas.append('Se trasladó cables de comunicación')
 
     trasladadas = d.partida(CONEXIONES_TRASLADADAS)
     if trasladadas > 0 or d.conexiones:

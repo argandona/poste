@@ -55,8 +55,11 @@ TIPOS = {
 
 # La hora de operario es genérica en el catálogo; en estos trabajos se usa para
 # el traslado de cables, y el capataz necesita leerlo para no confundirla.
+# *010213 venía como hora de cuadrilla con grúa, y es el traslado de cables de
+# comunicación.
 DESCRIPCIONES_MANO_DE_OBRA = {
     "*010101": "HORA DE OPERARIO (TRASLADO DE CABLES INACCESIBLE <=35MM)",
+    "*010213": "TRASLADO DE CABLES DE COMUNICACION",
 }
 
 # Nombres de obra con los que el capataz reconoce el material. Reemplazan a la

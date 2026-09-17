@@ -67,9 +67,12 @@ PARTIDAS_NUEVAS = {
 # pisan aunque ya tengan precio: el que traía el catálogo no era el pactado.
 # La hora de operario importa porque de ella sale el traslado de cable
 # delgado: la app divide el monto por metro entre este precio.
+# El traslado de cables de comunicación venía como hora de cuadrilla con grúa
+# a 201.04; lo pactado es 210.04.
 PRECIOS_FIJOS = {
     "*010101": ("HORA DE OPERARIO (TRASLADO DE CABLES INACCESIBLE <=35MM)",
                 "19.73"),
+    "*010213": ("TRASLADO DE CABLES DE COMUNICACION", "210.04"),
 }
 
 # Tipo de trabajo → materiales y partidas con su cantidad inicial.
