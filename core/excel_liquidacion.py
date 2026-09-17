@@ -5,9 +5,11 @@ La plantilla es la misma que se llenaba a mano (Liquidacion.xls), pasada a
 formatos y las demás hojas quedan como vienen.
 
 - Carátula: SST, cliente, actividad, distrito, fechas, contratista y capataz.
-- MATERIAL: la cantidad va en BT/AER. (columna AU), que es la que suma el
-  total de la fila para una obra aérea de baja tensión.
+- MATERIAL: la cantidad va en la columna AV.
 - MANO DE OBRA: la cantidad va en P1 (columna F), que suma la columna Cant.
+- Cables: los metros de cable de hasta 35 mm2 trasladado, un tramo del plano
+  por vano, desde I53 hacia la derecha.
+- Vereda: largo y ancho de cada paño del plano, desde C5 y D5 hacia abajo.
 
 Lo que la plantilla no trae listado se agrega en las filas libres de cada hoja.
 """
@@ -20,10 +22,18 @@ PLANTILLA = Path(__file__).resolve().parent / 'data' / 'plantilla_liquidacion.xl
 
 # Hoja MATERIAL
 MAT_PRIMERA, MAT_ULTIMA = 14, 170
-MAT_CANTIDAD = 'AU'
+MAT_CANTIDAD = 'AV'
 # Hoja MANO DE OBRA
 MO_PRIMERA, MO_ULTIMA = 7, 112
 MO_CANTIDAD = 'F'
+# Hoja Cables: fila de traslado y sus seis vanos (O53 los suma).
+CABLES_FILA = 53
+CABLES_VANOS = ['I', 'J', 'K', 'L', 'M', 'N']
+# Los calibres de hasta 35 mm2, como aparecen en la descripción del plano:
+# "3x16" también encuentra al "3x16+1x16".
+CABLES_HASTA_35 = ('2x16', '3x16', '3x35')
+# Hoja Vereda: un paño por fila.
+VEREDA_PRIMERA, VEREDA_ULTIMA = 5, 218
 
 
 def _clave(valor):
@@ -48,9 +58,10 @@ def _hoja_carátula(wb):
     return wb.worksheets[0]
 
 
-def generar_excel_liquidacion(encabezado, materiales, partidas):
+def generar_excel_liquidacion(encabezado, materiales, partidas, elementos_plano=()):
     """`encabezado`: sst, actividad, distrito, fecha (date o None), contratista,
-    capataz. `materiales` y `partidas`: listas de Item de cuaderno_obra."""
+    capataz. `materiales` y `partidas`: listas de Item de cuaderno_obra.
+    `elementos_plano`: lo guardado en el plano de la SST."""
     wb = load_workbook(PLANTILLA)
 
     car = _hoja_carátula(wb)
@@ -68,6 +79,8 @@ def generar_excel_liquidacion(encabezado, materiales, partidas):
 
     _llenar_material(wb['MATERIAL'], materiales)
     _llenar_mano_de_obra(wb['MANO DE OBRA'], partidas)
+    _llenar_cables(wb['Cables'], elementos_plano)
+    _llenar_veredas(wb['Vereda'], elementos_plano)
 
     buffer = io.BytesIO()
     wb.save(buffer)
@@ -120,3 +133,28 @@ def _llenar_mano_de_obra(ws, partidas):
             ws[f'M{fila}'] = f'=IF(A{fila}=0,"",(L{fila}*$E{fila}))'
             filas[_clave(p.codigo)] = fila
         ws[f'{MO_CANTIDAD}{fila}'] = float(p.cantidad)
+
+
+def tramos_hasta_35(elementos_plano):
+    """Metros de cada tramo de cable de hasta 35 mm2 trasladado, en el orden
+    en que se dibujaron."""
+    return [float(e.get('metros') or 0) for e in elementos_plano
+            if e.get('tipo') == 'cable' and e.get('estado') == 'T'
+            and any(c in (e.get('descripcion') or '').lower() for c in CABLES_HASTA_35)]
+
+
+def _llenar_cables(ws, elementos_plano):
+    tramos = tramos_hasta_35(elementos_plano)
+    # La plantilla trae seis vanos. Si hay más tramos, el último vano se
+    # lleva el resto, para que el total de la fila siga siendo el del plano.
+    ultimo = len(CABLES_VANOS) - 1
+    for i, metros in enumerate(tramos):
+        celda = f'{CABLES_VANOS[min(i, ultimo)]}{CABLES_FILA}'
+        ws[celda] = (ws[celda].value or 0) + metros if i > ultimo else metros
+
+
+def _llenar_veredas(ws, elementos_plano):
+    panos = [e for e in elementos_plano if e.get('tipo') == 'vereda']
+    for fila, pano in zip(range(VEREDA_PRIMERA, VEREDA_ULTIMA + 1), panos):
+        ws[f'C{fila}'] = float(pano.get('largo') or 0)
+        ws[f'D{fila}'] = float(pano.get('ancho') or 0)

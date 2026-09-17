@@ -217,11 +217,11 @@ class DescargasTests(BaseAPITestCase):
 
         mat = wb['MATERIAL']
         fila_poste = next(f for f in range(14, 171) if mat[f'A{f}'].value == 5331616)
-        self.assertEqual(mat[f'AU{fila_poste}'].value, 1)
+        self.assertEqual(mat[f'AV{fila_poste}'].value, 1)
         fila_propio = next(f for f in range(14, 171) if mat[f'A{f}'].value == 9999999)
         self.assertGreater(fila_propio, 100)
         self.assertEqual(mat[f'C{fila_propio}'].value, 'MATERIAL QUE NO ESTA')
-        self.assertEqual(mat[f'AU{fila_propio}'].value, 4)
+        self.assertEqual(mat[f'AV{fila_propio}'].value, 4)
 
         mo = wb['MANO DE OBRA']
         fila_insp = next(f for f in range(7, 113) if mo[f'A{f}'].value == '*094395')
@@ -229,6 +229,38 @@ class DescargasTests(BaseAPITestCase):
         fila_nueva = next(f for f in range(7, 113) if mo[f'A{f}'].value == '*777777')
         self.assertEqual(mo[f'F{fila_nueva}'].value, 3)
         self.assertEqual(mo[f'I{fila_nueva}'].value, f'=SUM(F{fila_nueva}:H{fila_nueva})')
+
+    def test_excel_cables_hasta_35_y_veredas_del_plano(self):
+        self.liquidar()
+        PlanoSST.objects.create(
+            empresa=self.empresa, sst_codigo=self.sst.codigo, usuario=self.capataz,
+            elementos=[
+                {'tipo': 'cable', 'estado': 'T', 'descripcion': 'Caais 3x35+1x16', 'metros': 26},
+                {'tipo': 'cable', 'estado': 'T', 'descripcion': 'Caais 3x70', 'metros': 25},
+                {'tipo': 'cable', 'estado': 'I', 'descripcion': 'Caais 3x35', 'metros': 9},
+                {'tipo': 'cable', 'estado': 'T', 'descripcion': 'Caais 2x16', 'metros': 15},
+                {'tipo': 'cable', 'estado': 'A', 'metros': 30},
+                {'tipo': 'vereda', 'largo': 2, 'ancho': 1.5},
+                {'tipo': 'vereda', 'largo': 3, 'ancho': 0.8},
+            ])
+        wb = load_workbook(io.BytesIO(self.get('/api/liquidaciones/excel/').content))
+        cab = wb['Cables']
+        # Solo lo trasladado de hasta 35 mm2, un tramo por vano.
+        self.assertEqual([cab[f'{c}53'].value for c in 'IJKLMN'],
+                         [26, 15, None, None, None, None])
+        self.assertEqual(cab['O53'].value, '=+SUM(I53:N53)')
+        ver = wb['Vereda']
+        self.assertEqual((ver['C5'].value, ver['D5'].value), (2, 1.5))
+        self.assertEqual((ver['C6'].value, ver['D6'].value), (3, 0.8))
+        self.assertIsNone(ver['C7'].value)
+
+    def test_mas_de_seis_tramos_el_ultimo_vano_se_lleva_el_resto(self):
+        from ..excel_liquidacion import _llenar_cables
+        from openpyxl import Workbook
+        ws = Workbook().active
+        _llenar_cables(ws, [{'tipo': 'cable', 'estado': 'T', 'descripcion': 'Caais 3x16',
+                             'metros': m} for m in (10, 20, 30, 40, 5, 7, 8)])
+        self.assertEqual([ws[f'{c}53'].value for c in 'IJKLMN'], [10, 20, 30, 40, 5, 15])
 
     def test_excel_sin_liquidacion(self):
         r = self.get('/api/liquidaciones/excel/')
