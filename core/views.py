@@ -1661,6 +1661,14 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
         suministro = self.request.query_params.get('suministro')
         if suministro:
             qs = qs.filter(suministro_id=suministro)
+        # El poste del proyecto externo no tiene id local: se pide por su
+        # número, y con la SST si se sabe, porque el número puede repetirse.
+        externo = self.request.query_params.get('suministro_externo')
+        if externo:
+            qs = qs.filter(suministro_externo=externo)
+        sst = self.request.query_params.get('sst')
+        if sst:
+            qs = qs.filter(sst_externo=sst)
         return qs
 
     def create(self, request, *args, **kwargs):
@@ -1769,7 +1777,7 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
         MISMO suministro."""
         usuario_id = request.query_params.get('usuario')
         qs = (LiquidacionSuministro.objects
-              .select_related('tipo_trabajo')
+              .select_related('tipo_trabajo', 'suministro')
               .prefetch_related('partidas__mano_de_obra'))
         if usuario_id:
             qs = qs.filter(usuario_id=usuario_id)
@@ -1779,11 +1787,16 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
         for att in ActividadTipoTrabajo.objects.select_related('actividad'):
             act_por_tipo.setdefault(att.tipo_trabajo_id, att.actividad.nombre)
 
+        # Fecha y hora de ejecución: la pantalla de corregir las vuelve a
+        # mostrar tal como se guardaron.
         fecha_por_sst = {}
+        hora_por_sst = {}
         for sst in SST.objects.all():
             clave = sst.codigo or sst.sst
             if clave:
                 fecha_por_sst[clave] = str(sst.fecha_ejecucion) if sst.fecha_ejecucion else ''
+                hora_por_sst[clave] = (sst.hora_ejecucion.strftime('%H:%M')
+                                       if sst.hora_ejecucion else '')
 
         def sst_de(liq):
             if liq.sst_externo:
@@ -1801,7 +1814,17 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
         # 1) Agrupar por poste (sst, suministro): partidas + actividad.
         postes = {}
         for liq in qs:
-            g = postes.setdefault((sst_de(liq), sum_de(liq)), {'act': '', 'partidas': {}})
+            g = postes.setdefault((sst_de(liq), sum_de(liq)),
+                                  {'act': '', 'partidas': {}, 'liquidaciones': [],
+                                   'suministro_id': None, 'externo': '',
+                                   'numero': '', 'distrito': ''})
+            g['liquidaciones'].append(liq)
+            if liq.suministro_id:
+                g['suministro_id'] = liq.suministro_id
+                g['numero'] = liq.suministro.numero_suministro
+                g['distrito'] = liq.suministro.distrito or ''
+            if liq.suministro_externo:
+                g['externo'] = liq.suministro_externo
             act = act_por_tipo.get(liq.tipo_trabajo_id, '')
             if act and (_norm_txt(act) in INCLUSIONES_CONSOLIDADO or not g['act']):
                 g['act'] = act
@@ -1820,7 +1843,24 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
                 for pc in regla['paquete']:
                     if pc in g['partidas']:
                         num += g['partidas'][pc]['cantidad']
-            agg = ssts.setdefault(sst_cod, {'act': g['act'], 'cambios': Decimal('0'), 'partidas': {}})
+            agg = ssts.setdefault(sst_cod, {'act': g['act'], 'cambios': Decimal('0'),
+                                            'partidas': {}, 'postes': []})
+            # Cada poste con lo que se le liquidó: es por donde se entra a
+            # corregir una liquidación desde el consolidado.
+            agg['postes'].append({
+                'suministro': g['externo'] or g['numero'] or _sum,
+                'suministro_id': g['suministro_id'],
+                'suministro_externo': g['externo'],
+                'distrito': g['distrito'],
+                'actividad': g['act'],
+                'liquidaciones': [
+                    {'id_liquidacion': liq.pk,
+                     'tipo_trabajo': liq.tipo_trabajo_id,
+                     'tipo_trabajo_nombre': liq.tipo_trabajo.nombre,
+                     'usuario': liq.usuario_id}
+                    for liq in g['liquidaciones']
+                ],
+            })
             if regla:
                 agg['act'] = g['act']
             agg['cambios'] += num
@@ -1905,8 +1945,10 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
             resultado.append({
                 'sst': sst_cod, 'actividad': agg['act'],
                 'fecha': fecha_por_sst.get(sst_cod, ''),
+                'hora': hora_por_sst.get(sst_cod, ''),
                 'cambios_poste': str(agg['cambios']),
                 'total': str(total), 'partidas': items,
+                'postes': sorted(agg['postes'], key=lambda p: p['suministro']),
             })
         resultado.sort(key=lambda r: (r['fecha'] == '', r['fecha'], r['sst']))
         return Response(resultado)
