@@ -653,6 +653,30 @@ class LiquidacionSuministroCreateSerializer(serializers.Serializer):
             )
         return data
 
+    @staticmethod
+    def _devolver_al_camion(liquidaciones):
+        """Repone el material que consumieron [liquidaciones]. Cada consumo
+        vuelve al camión de quien lo cargó, no al de quien está corrigiendo.
+        Si ese usuario ya no tiene camión activo no hay a dónde devolverlo y se
+        deja así: la liquidación vieja igual se reemplaza."""
+        from .models import ConsumoMaterialSuministro, StockCamion, UsuarioCamion
+
+        consumos = list(ConsumoMaterialSuministro.objects
+                        .filter(liquidacion__in=liquidaciones)
+                        .select_related('material', 'usuario'))
+        camiones = {}
+        for consumo in consumos:
+            if consumo.usuario_id not in camiones:
+                camiones[consumo.usuario_id] = (
+                    UsuarioCamion.camion_activo_de_usuario(consumo.usuario))
+            camion = camiones[consumo.usuario_id]
+            if camion is None:
+                continue
+            stock, _ = StockCamion.objects.select_for_update().get_or_create(
+                camion=camion, material=consumo.material,
+                defaults={'cantidad': 0})
+            stock.agregar(consumo.cantidad)
+
     def create(self, validated_data):
         from django.db import transaction
         from django.core.exceptions import ValidationError as DjangoValidationError
@@ -669,10 +693,13 @@ class LiquidacionSuministroCreateSerializer(serializers.Serializer):
         sst_externo        = validated_data.get('sst_externo', '')
         es_devuelto        = estado == 'DEVUELTO'
         with transaction.atomic():
-            # Reemplazo: si el usuario ya liquidó este poste con este tipo de
-            # trabajo, se borra la anterior (re-liquidar = corregir, no acumular).
+            # Reemplazo: si este poste ya se liquidó con este tipo de trabajo,
+            # se borra la anterior (re-liquidar = corregir, no acumular). No
+            # importa quién la cargó: desde el consolidado la corrige el
+            # liquidador o el coordinador, y si se filtrara por usuario
+            # quedarían las dos y el consolidado las sumaría.
             prev = LiquidacionSuministro.objects.filter(
-                usuario=usuario, tipo_trabajo=validated_data.get('tipo_trabajo'))
+                tipo_trabajo=validated_data.get('tipo_trabajo'))
             if suministro_local:
                 prev = prev.filter(suministro=suministro_local)
             elif suministro_externo:
@@ -680,6 +707,10 @@ class LiquidacionSuministroCreateSerializer(serializers.Serializer):
                                    sst_externo=sst_externo)
             else:
                 prev = prev.none()
+            # Re-liquidar es corregir: lo que consumió la liquidación que se
+            # reemplaza vuelve al camión antes de descontar lo nuevo. Sin esto
+            # cada corrección le comía stock al camión.
+            self._devolver_al_camion(prev)
             prev.delete()
 
             liq = LiquidacionSuministro.objects.create(**validated_data)
