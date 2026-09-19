@@ -105,6 +105,7 @@ from .models import (
     SSTEncargado, SSTSuministro, Suministro, TipoTrabajo, SuministroTipoTrabajo,
     SuministroManoDeObra, TipoTrabajoManoDeObra, TipoTrabajoMaterial, ManoDeObra, Recupero, SuministroRecupero,
     LiquidacionSuministro, LiquidacionPartida, ConsumoMaterialSuministro,
+    CorreccionLiquidacion,
     PlanoSST,
 )
 from .serializers import (
@@ -125,6 +126,7 @@ from .serializers import (
     SuministroSerializer, TipoTrabajoSerializer, ActividadSerializer, ManoDeObraSerializer,
     SuministroManoDeObraSerializer, RecuperoSerializer, SuministroRecuperoSerializer,
     LiquidacionSuministroSerializer, LiquidacionSuministroCreateSerializer,
+    CorreccionLiquidacionSerializer,
     ConsumoMaterialSuministroSerializer,
     PlanoSSTSerializer,
 )
@@ -1672,10 +1674,43 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
         return qs
 
     def create(self, request, *args, **kwargs):
-        serializer = LiquidacionSuministroCreateSerializer(data=request.data)
+        serializer = LiquidacionSuministroCreateSerializer(
+            data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         liq = serializer.save()
         return Response(LiquidacionSuministroSerializer(liq).data, status=201)
+
+    @action(detail=False, methods=['get'])
+    def correcciones(self, request):
+        """GET /api/liquidaciones/correcciones/ — quién corrigió qué y cuándo.
+
+        Se filtra por el mismo poste con que se piden las liquidaciones
+        (suministro local, o número externo con su SST) y, si se quiere, por
+        tipo de trabajo. Sin filtros devuelve las últimas correcciones de
+        todos.
+
+        Es un acta de auditoría: la ve el Coordinador y nadie más. El capataz
+        no tiene por qué mirar quién le corrigió la liquidación."""
+        actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
+        if not actor or not actor.puede_ver_correcciones():
+            return Response(
+                {'detail': 'Solo un Coordinador puede ver las correcciones.'},
+                status=403)
+        qs = (CorreccionLiquidacion.objects
+              .select_related('suministro', 'usuario', 'usuario_anterior', 'tipo_trabajo'))
+        suministro = request.query_params.get('suministro')
+        if suministro:
+            qs = qs.filter(suministro_id=suministro)
+        externo = request.query_params.get('suministro_externo')
+        if externo:
+            qs = qs.filter(suministro_externo=externo)
+        sst = request.query_params.get('sst')
+        if sst:
+            qs = qs.filter(sst_externo=sst)
+        tipo = request.query_params.get('tipo_trabajo')
+        if tipo:
+            qs = qs.filter(tipo_trabajo_id=tipo)
+        return Response(CorreccionLiquidacionSerializer(qs[:200], many=True).data)
 
     def _sst_liquidada(self, request):
         """La SST del parámetro ?sst=, con lo que se liquidó en ella. Sin
