@@ -72,6 +72,9 @@ class Usuario(models.Model):
     def puede_gestionar_almacen(self): return self._tiene(Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
     def puede_gestionar_empresa(self): return self._tiene(Rol.ADMIN_EMPRESA, Rol.SUPERADMIN)
     def puede_asignar_sst(self): return self._tiene(Rol.COORDINADOR, Rol.SUPERADMIN)
+    # Las actas de corrección de liquidación: quién cambió qué y cuándo. Se
+    # miran desde la web, no desde la app, y solo las ve el Coordinador.
+    def puede_ver_correcciones(self): return self._tiene(Rol.COORDINADOR, Rol.SUPERADMIN)
 
     def clean(self):
         if self.rol_secundario_id and self.rol_secundario_id == self.rol_id:
@@ -821,6 +824,48 @@ class ConsumoMaterialSuministro(models.Model):
         db_table = "consumo_material_suministro"
     def __str__(self):
         return f"{self.suministro} – {self.material} x{self.cantidad}"
+
+
+class CorreccionLiquidacion(models.Model):
+    """Lo que decía una liquidación antes de corregirla, y quién la corrigió.
+
+    Re-liquidar un poste borra la liquidación anterior (corregir no es
+    acumular), así que sin esta tabla la versión vieja no quedaba en ningún
+    lado: no había con qué responder si el cliente observaba un monto. Aquí se
+    guarda entera, no solo lo que cambió.
+
+    No apunta a la liquidación con una FK porque la fila que retrata ya no
+    existe: se identifica por el mismo poste y tipo de trabajo con que se
+    buscan las liquidaciones."""
+    id_correccion      = models.AutoField(primary_key=True)
+    suministro         = models.ForeignKey(Suministro, on_delete=models.PROTECT,
+                                           related_name="correcciones_liquidacion",
+                                           null=True, blank=True)
+    suministro_externo = models.CharField(max_length=20, blank=True)
+    sst_externo        = models.CharField(max_length=20, blank=True)
+    tipo_trabajo       = models.ForeignKey(TipoTrabajo, on_delete=models.PROTECT,
+                                           related_name="correcciones_liquidacion")
+    # Quién había liquidado y quién corrigió. Casi nunca son el mismo: desde el
+    # consolidado corrige el liquidador o el coordinador.
+    usuario_anterior   = models.ForeignKey(Usuario, on_delete=models.PROTECT,
+                                           related_name="liquidaciones_corregidas")
+    usuario            = models.ForeignKey(Usuario, on_delete=models.PROTECT,
+                                           related_name="correcciones_liquidacion")
+    # Cuándo se corrigió, con hora: en un mismo día puede corregirse dos veces.
+    fecha              = models.DateTimeField(auto_now_add=True)
+    # La fecha que llevaba la liquidación reemplazada.
+    fecha_anterior     = models.DateField(null=True, blank=True)
+    # La versión vieja completa: partidas, materiales, observación y comentario.
+    anterior           = models.JSONField(default=dict)
+    # Lo que cambió, ya redactado, para leerlo sin comparar nada a mano.
+    cambios            = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "correccion_liquidacion"
+        ordering = ["-fecha"]
+
+    def __str__(self):
+        return f"Corrección {self.tipo_trabajo} – {self.fecha:%d/%m/%Y %H:%M}"
 
 
 class CuadernoObra(models.Model):

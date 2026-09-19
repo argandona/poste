@@ -15,6 +15,7 @@ from .models import (
     Actividad, ActividadTipoTrabajo,
     SuministroManoDeObra, TipoTrabajoManoDeObra, TipoTrabajoMaterial, Recupero, SuministroRecupero,
     LiquidacionSuministro, LiquidacionPartida, ConsumoMaterialSuministro,
+    CorreccionLiquidacion,
     PlanoSST,
 )
 
@@ -620,6 +621,97 @@ class ConsumoMaterialCreateSerializer(serializers.Serializer):
     cantidad = serializers.DecimalField(max_digits=10, decimal_places=2)
 
 
+def _cantidad_legible(valor):
+    """2.00 → '2', 1.50 → '1.5'. El registro se lee, no se suma."""
+    texto = f"{valor:f}" if valor is not None else '0'
+    if '.' in texto:
+        texto = texto.rstrip('0').rstrip('.')
+    return texto or '0'
+
+
+def _retrato_liquidacion(liq):
+    """Lo que decía una liquidación, entero, para guardarlo antes de borrarla."""
+    return {
+        'id_liquidacion': liq.id_liquidacion,
+        'usuario': liq.usuario.nombre,
+        'fecha': str(liq.fecha),
+        'observacion': liq.observacion or '',
+        'comentario': liq.comentario or '',
+        'partidas': [
+            {
+                'partida': p.mano_de_obra.partida,
+                'descripcion': p.mano_de_obra.descripcion,
+                'cantidad': _cantidad_legible(p.cantidad),
+            }
+            for p in liq.partidas.all()
+        ],
+        'materiales': [
+            {
+                'matricula': c.material.matricula,
+                'descripcion': c.material.descripcion,
+                'cantidad': _cantidad_legible(c.cantidad),
+            }
+            for c in liq.materiales_consumidos.all()
+        ],
+    }
+
+
+def _diferencias(antes, ahora, clave):
+    """Qué se agregó, qué se quitó y qué cambió de cantidad entre dos listas."""
+    viejo = {f[clave]: f['cantidad'] for f in antes}
+    nuevo = {f[clave]: f['cantidad'] for f in ahora}
+    frases = []
+    for cod in sorted(set(viejo) | set(nuevo)):
+        if cod not in nuevo:
+            frases.append(f'quitó {cod} ({viejo[cod]})')
+        elif cod not in viejo:
+            frases.append(f'agregó {cod} ({nuevo[cod]})')
+        elif viejo[cod] != nuevo[cod]:
+            frases.append(f'{cod} de {viejo[cod]} a {nuevo[cod]}')
+    return frases
+
+
+def _redactar_cambios(antes, ahora):
+    """Lo que cambió entre dos retratos, ya escrito para leerlo de corrido."""
+    lineas = []
+    mo = _diferencias(antes['partidas'], ahora['partidas'], 'partida')
+    if mo:
+        lineas.append('Mano de obra: ' + '; '.join(mo) + '.')
+    mt = _diferencias(antes['materiales'], ahora['materiales'], 'matricula')
+    if mt:
+        lineas.append('Material: ' + '; '.join(mt) + '.')
+    if antes['observacion'] != ahora['observacion']:
+        lineas.append('Cambió la observación.')
+    if antes['comentario'] != ahora['comentario']:
+        lineas.append('Cambió el comentario.')
+    if not lineas:
+        return 'Se volvió a grabar sin cambios.'
+    return ' '.join(lineas)
+
+
+class CorreccionLiquidacionSerializer(serializers.ModelSerializer):
+    usuario_nombre          = serializers.CharField(source='usuario.nombre',           read_only=True)
+    usuario_anterior_nombre = serializers.CharField(source='usuario_anterior.nombre',  read_only=True)
+    tipo_trabajo_nombre     = serializers.CharField(source='tipo_trabajo.nombre',      read_only=True)
+    numero_suministro       = serializers.SerializerMethodField()
+
+    def get_numero_suministro(self, obj):
+        if obj.suministro_id:
+            return obj.suministro.numero_suministro
+        return obj.suministro_externo or ''
+
+    class Meta:
+        model  = CorreccionLiquidacion
+        fields = [
+            'id_correccion',
+            'suministro', 'numero_suministro', 'suministro_externo', 'sst_externo',
+            'tipo_trabajo', 'tipo_trabajo_nombre',
+            'usuario', 'usuario_nombre',
+            'usuario_anterior', 'usuario_anterior_nombre',
+            'fecha', 'fecha_anterior', 'cambios', 'anterior',
+        ]
+
+
 class LiquidacionSuministroCreateSerializer(serializers.Serializer):
     # Suministro local (opcional si se usa suministro externo)
     suministro          = serializers.PrimaryKeyRelatedField(queryset=Suministro.objects.all(), required=False, allow_null=True)
@@ -652,6 +744,19 @@ class LiquidacionSuministroCreateSerializer(serializers.Serializer):
                 {'motivo': 'El motivo es obligatorio cuando el suministro es DEVUELTO.'}
             )
         return data
+
+    def _quien_corrige(self):
+        """El usuario con la sesión abierta, para firmar la corrección.
+
+        No se usa el `usuario` del cuerpo: ese dice de quién es el material que
+        se descuenta, y un registro de auditoría no debe poder firmarse a
+        nombre de otro. Si no hay sesión (tests viejos, scripts) se cae al del
+        cuerpo, que es lo que había antes."""
+        peticion = self.context.get('request')
+        id_usuario = getattr(getattr(peticion, 'user', None), 'id_usuario', None)
+        if not id_usuario:
+            return None
+        return Usuario.objects.filter(pk=id_usuario).first()
 
     @staticmethod
     def _devolver_al_camion(liquidaciones):
@@ -707,6 +812,12 @@ class LiquidacionSuministroCreateSerializer(serializers.Serializer):
                                    sst_externo=sst_externo)
             else:
                 prev = prev.none()
+            # Antes de borrarla hay que retratarla: al salir de aquí, esa copia
+            # es lo único que queda de lo que decía y de quién la liquidó.
+            previas = list(prev.select_related('usuario')
+                               .prefetch_related('partidas__mano_de_obra',
+                                                 'materiales_consumidos__material'))
+            retratos = [(p, _retrato_liquidacion(p)) for p in previas]
             # Re-liquidar es corregir: lo que consumió la liquidación que se
             # reemplaza vuelve al camión antes de descontar lo nuevo. Sin esto
             # cada corrección le comía stock al camión.
@@ -744,6 +855,23 @@ class LiquidacionSuministroCreateSerializer(serializers.Serializer):
                         usuario=usuario,
                         material=m['material'],
                         cantidad=m['cantidad'],
+                    )
+            # El acta de la corrección: qué decía antes, quién la cambió y qué
+            # cambió. Se arma al final, cuando la nueva ya está completa.
+            if retratos:
+                ahora = _retrato_liquidacion(liq)
+                corrige = self._quien_corrige() or usuario
+                for previa, retrato in retratos:
+                    CorreccionLiquidacion.objects.create(
+                        suministro=suministro_local,
+                        suministro_externo=suministro_externo,
+                        sst_externo=sst_externo,
+                        tipo_trabajo=liq.tipo_trabajo,
+                        usuario_anterior=previa.usuario,
+                        usuario=corrige,
+                        fecha_anterior=previa.fecha,
+                        anterior=retrato,
+                        cambios=_redactar_cambios(retrato, ahora),
                     )
             # Reflejar el estado en el suministro local (si lo hay)
             if suministro_local:
