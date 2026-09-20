@@ -20,7 +20,8 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from core.models import (
-    Actividad, ActividadTipoTrabajo, LiquidacionSuministro, SST, TipoTrabajo,
+    Actividad, ActividadTipoTrabajo, LiquidacionSuministro, ManoDeObra, SST,
+    TipoTrabajo, TipoTrabajoManoDeObra,
 )
 
 NOMBRE = "Cambio de poste inacc. cabria subterraneo"
@@ -38,6 +39,17 @@ TIPOS = ["poste", "Alumbrado cabria", "Retiros - otros - cabria"]
 # Los que hacían ese trabajo antes y ya no pertenecen a esta actividad.
 TIPOS_QUE_SALEN = ["alumbrado", "Otros"]
 
+# Partidas que el tipo propio de esta actividad necesita y que su catálogo
+# podía no traer. Se AGREGAN: aquí no se quita nada, porque ese catálogo lo
+# mantiene el Coordinador desde su pantalla.
+PARTIDAS_QUE_FALTAN = {
+    # El arrastre del plano que pase de 100 se paga como traslado manual,
+    # igual que en Poste cabria. En el consolidado esta misma partida recibe
+    # además el excedente de acarreo (*090633): son dos traslados distintos
+    # y se suman.
+    "poste": ["*090634"],
+}
+
 
 class Command(BaseCommand):
     help = ('Renombra la actividad de cabria subterráneo y le deja sus tres '
@@ -54,6 +66,7 @@ class Command(BaseCommand):
 
         self._vincular(actividad)
         self._desvincular(actividad)
+        self._completar_catalogo()
 
         tipos = (ActividadTipoTrabajo.objects
                  .filter(actividad=actividad)
@@ -116,6 +129,25 @@ class Command(BaseCommand):
                 defaults={"orden": orden})
             if creado:
                 self.stdout.write(f"  + {nombre}")
+
+    def _completar_catalogo(self):
+        """Le agrega al tipo propio las partidas que su regla ya calcula y que
+        el catálogo podía no tener. Nunca quita."""
+        for nombre, partidas in PARTIDAS_QUE_FALTAN.items():
+            tipo = TipoTrabajo.objects.filter(nombre=nombre).first()
+            if tipo is None:
+                continue
+            for codigo in partidas:
+                mo = ManoDeObra.objects.filter(partida=codigo).first()
+                if mo is None:
+                    self.stdout.write(self.style.WARNING(
+                        f"  No existe la partida {codigo}: se omite."))
+                    continue
+                _, creado = TipoTrabajoManoDeObra.objects.get_or_create(
+                    tipo_trabajo=tipo, mano_de_obra=mo,
+                    defaults={"cantidad_inicial": 0})
+                if creado:
+                    self.stdout.write(f"  {nombre}: + {codigo}")
 
     def _desvincular(self, actividad):
         """Saca de la actividad los tipos que ya no van. No los borra: pueden

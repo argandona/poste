@@ -148,6 +148,34 @@ class CabriaSubterraneoTests(BaseAPITestCase):
         self.assertEqual(self.tipos_de("Cambio de poste inacc. cabria aereo"),
                          ["Alumbrado cabria", "Retiros - otros - cabria"])
 
+    # ── El catálogo del tipo propio ─────────────────────────────────────────
+
+    def test_el_poste_gana_el_traslado_manual(self):
+        """Su regla ya calcula el arrastre que pasa de 100; la partida tiene
+        que estar en el catálogo para poder liquidarla."""
+        ManoDeObra.objects.create(
+            partida="*090634", descripcion="TRASLADO MANUAL", precio="5.00")
+        self.configurar()
+        self.assertTrue(TipoTrabajoManoDeObra.objects.filter(
+            tipo_trabajo=self.poste, mano_de_obra__partida="*090634").exists())
+
+    def test_completar_el_catalogo_no_quita_nada(self):
+        otra = ManoDeObra.objects.create(
+            partida="*094913", descripcion="PUNTA DE DIAMANTE", precio="7.00")
+        TipoTrabajoManoDeObra.objects.create(
+            tipo_trabajo=self.poste, mano_de_obra=otra)
+        ManoDeObra.objects.create(
+            partida="*090634", descripcion="TRASLADO MANUAL", precio="5.00")
+        self.configurar()
+        self.assertTrue(TipoTrabajoManoDeObra.objects.filter(
+            tipo_trabajo=self.poste, mano_de_obra=otra).exists())
+
+    def test_sin_la_partida_en_el_catalogo_general_no_revienta(self):
+        # *090634 no existe en ManoDeObra: el comando avisa y sigue.
+        self.configurar()
+        self.assertFalse(TipoTrabajoManoDeObra.objects.filter(
+            tipo_trabajo=self.poste, mano_de_obra__partida="*090634").exists())
+
     # ── Repetirlo no rompe nada ─────────────────────────────────────────────
 
     def test_es_idempotente(self):
