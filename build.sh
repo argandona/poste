@@ -14,3 +14,6 @@ python manage.py createcachetable
 python manage.py cargar_recuperos
 python manage.py configurar_tipos_viento
 python manage.py configurar_cabria
+# Cabria subterráneo comparte dos tipos de trabajo con la aérea, así que va
+# después: los tipos los crea el comando de arriba.
+python manage.py configurar_cabria_subterraneo
