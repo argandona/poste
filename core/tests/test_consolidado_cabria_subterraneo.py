@@ -39,6 +39,10 @@ class ConsolidadoCabriaSubterraneoTests(BaseAPITestCase):
         self.p_luminaria = self._partida("*091320", "LUMINARIA COMPLETA")
         self.p_retiro_lum = self._partida("*091316", "RETIRO DE LUMINARIA")
         self.p_acarreo = self._partida("*090633", "ACARREO PARA CIMENTACION")
+        self.p_subida = self._partida(
+            "*091240", "SUBIDA A POSTE C/EMPALME P/AP")
+        self.p_escalamiento = self._partida(
+            "*090238", "ESCALAMIENTO DE POSTE CON ESCALERA")
 
     def _tipo(self, nombre):
         tipo = TipoTrabajo.objects.create(nombre=nombre)
@@ -120,6 +124,39 @@ class ConsolidadoCabriaSubterraneoTests(BaseAPITestCase):
                       {self.p_luminaria: 1, self.p_retiro_lum: 1})
         partidas = self.consolidado()
         self.assertEqual(self.cobrado(partidas, "*091320", "*091316"), 1.0)
+
+    # ── Subir al poste y escalarlo ya van en el paquete ─────────────────────
+
+    def test_el_cambio_de_poste_incluye_la_subida(self):
+        """Casi nunca se liquida en esta actividad, pero si se liquida, el
+        paquete ya la trae: son S/ 251.40 que no se cobran dos veces."""
+        self.cambio_de_poste()
+        self.liquidar(self.t_poste, {self.p_subida: 1})
+        self.assertEqual(
+            self.consolidado()["*091240"]["cantidad_cobrada"], "0.00")
+
+    def test_la_segunda_subida_si_se_cobra(self):
+        self.cambio_de_poste()
+        self.liquidar(self.t_poste, {self.p_subida: 2})
+        self.assertEqual(
+            self.consolidado()["*091240"]["cantidad_cobrada"], "1.00")
+
+    def test_dos_cambios_incluyen_dos_subidas(self):
+        self.cambio_de_poste(2)
+        self.liquidar(self.t_poste, {self.p_subida: 2})
+        self.assertEqual(
+            self.consolidado()["*091240"]["cantidad_cobrada"], "0.00")
+
+    def test_sin_cambio_de_poste_la_subida_se_cobra_entera(self):
+        self.liquidar(self.t_poste, {self.p_subida: 1})
+        self.assertEqual(
+            self.consolidado()["*091240"]["cantidad_cobrada"], "1.00")
+
+    def test_el_escalamiento_va_igual(self):
+        self.cambio_de_poste()
+        self.liquidar(self.t_poste, {self.p_escalamiento: 1})
+        self.assertEqual(
+            self.consolidado()["*090238"]["cantidad_cobrada"], "0.00")
 
     # ── Lo que no cambió ────────────────────────────────────────────────────
 

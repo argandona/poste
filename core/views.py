@@ -31,6 +31,11 @@ INCLUSIONES_CONSOLIDADO = {
         'incluidos': {
             '*090633': 100,   # el cambio de poste ya incluye 100 de acarreo
             '*091840': {'segun': '*090470', 'cantidad': 2},  # 2 incluidos por cambio CON vereda
+            # Cambiar el poste ya incluye subirse a él y escalarlo, igual que
+            # en cabria aérea. En esta actividad casi nunca se liquidan; el
+            # descuento está por si alguna vez se liquidan.
+            '*091240': 1,     # subida a poste
+            '*090238': 1,     # escalamiento con escalera
         },
         # Desde el 2026-09-20 el alumbrado de esta actividad es el mismo tipo
         # de trabajo que el de cabria aérea, así que trae también el conector
