@@ -7,7 +7,7 @@ Incluye:
   - Roles (incluye Coordinador) y usuarios (clave: tecsur123).
   - Empresa, almacén, camión ABC-123 asignado al capataz.
   - Mano de obra (73 partidas) y materiales + stock del camión.
-  - Actividad "Cambio de poste inaccesible subterráneo".
+  - Actividad "Cambio de poste inacc. cabria subterraneo".
   - Tipos de trabajo "poste" y "alumbrado" con sus partidas y materiales.
   - 2 SST con suministros asignados al capataz para liquidar.
 """
@@ -38,18 +38,13 @@ ROLES = {
     Rol.COORDINADOR: "Coordinador",
 }
 
-ACTIVIDAD = "Cambio de poste inaccesible subterráneo"
+ACTIVIDAD = "Cambio de poste inacc. cabria subterraneo"
 ACTIVIDAD_VIENTO = "Cambio de poste inaccesible subterráneo-viento"
 
 POSTE_MO = ['*094395', '*095266', '*091840', '*091842', '*094918', '*094913',
             '*094911', '*090471', '*090470', '*090633', '*090632', '*090630']
 POSTE_MAT = ['5331596', '5331616', '5411056', '5111102', '5131920', '5114702',
              '5031165', '5111587']
-
-ALUMBRADO_MO = ['*091320', '*091316', '*091322', '*091346', '*091357', '*091356',
-                '*091608']
-ALUMBRADO_MAT = ['5567146', '5111215', '5347088', '5347206', '5347174', '5347015',
-                 '5021407', '6941274', '5411058']
 
 
 class Command(BaseCommand):
@@ -137,15 +132,20 @@ class Command(BaseCommand):
                     TipoTrabajoMaterial.objects.get_or_create(tipo_trabajo=tt, material=mat)
             return tt
 
-        # Actividad normal: poste, alumbrado, Otros (con su MO/MT).
+        # Cabria subterráneo: el poste es suyo; "Alumbrado cabria" y
+        # "Retiros - otros - cabria" son los mismos de cabria aérea y se los
+        # cuelga configurar_cabria_subterraneo, al final.
         crear_tipo("poste", POSTE_MO, POSTE_MAT, [actividad])
-        crear_tipo("alumbrado", ALUMBRADO_MO, ALUMBRADO_MAT, [actividad])
-        crear_tipo("Otros", ["*010213"], [], [actividad])
         # Actividad "-viento": tipos PROPIOS y VACÍOS (MO/MT se cargan aparte).
         crear_tipo("Poste viento", [], [], [actividad_viento])
         crear_tipo("Alumbrado viento", [], [], [actividad_viento])
         crear_tipo("Otros viento", [], [], [actividad_viento])
         self.stdout.write("Actividades y tipos de trabajo listos.")
+
+        # Los catálogos de cabria, iguales que en Render: la actividad aérea
+        # completa y la subterránea con sus dos tipos compartidos.
+        call_command("configurar_cabria")
+        call_command("configurar_cabria_subterraneo")
 
         # Nota: las SST se asignan manualmente desde el módulo del Coordinador.
         self.stdout.write(self.style.SUCCESS("Entorno de prueba sembrado correctamente."))

@@ -29,11 +29,19 @@ INCLUSIONES_CONSOLIDADO = {
         # Dict {'segun': partida, 'cantidad': v} -> se multiplica por la cantidad
         # de esa partida específica del paquete (ej. solo *090470 con vereda).
         'incluidos': {
-            '*091608': 2, '*091320': 1, '*091316': 1, '*091322': 1,
-            '*091346': 1, '*091357': 1, '*091356': 1,
             '*090633': 100,   # el cambio de poste ya incluye 100 de acarreo
             '*091840': {'segun': '*090470', 'cantidad': 2},  # 2 incluidos por cambio CON vereda
         },
+        # Desde el 2026-09-20 el alumbrado de esta actividad es el mismo tipo
+        # de trabajo que el de cabria aérea, así que trae también el conector
+        # *090810. Se cuenta por grupos, igual que allá: el paquete incluye
+        # dos empalmes sea del tipo que sea, y una luminaria y un pastoral,
+        # se hayan instalado, retirado o trasladado.
+        'incluidos_grupo': [
+            {'partidas': ['*091608', '*090810'], 'cantidad': 2},
+            {'partidas': ['*091320', '*091316', '*091322'], 'cantidad': 1},
+            {'partidas': ['*091346', '*091357', '*091356'], 'cantidad': 1},
+        ],
         # Derivación: el excedente de acarreo se cobra como traslado manual.
         # origen (*090633) ÷ divisor; si supera umbral*N, el sobrante va a destino.
         'derivar': {
@@ -63,6 +71,13 @@ INCLUSIONES_CONSOLIDADO = {
         ],
     },
 }
+
+# La actividad subterránea se renombró el 2026-09-20 a "Cambio de poste inacc.
+# cabria subterraneo". Sus descuentos de "lo ya incluido" son los mismos: el
+# poste sigue siendo el suyo, solo cambió el nombre. Valen los dos mientras
+# queden bases sin renombrar.
+INCLUSIONES_CONSOLIDADO['cambio de poste inacc. cabria subterraneo'] = \
+    INCLUSIONES_CONSOLIDADO['cambio de poste inaccesible subterraneo']
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models, transaction
 from rest_framework import viewsets, status, permissions
