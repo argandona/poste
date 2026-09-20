@@ -43,11 +43,21 @@ TIPOS_QUE_SALEN = ["alumbrado", "Otros"]
 # podía no traer. Se AGREGAN: aquí no se quita nada, porque ese catálogo lo
 # mantiene el Coordinador desde su pantalla.
 PARTIDAS_QUE_FALTAN = {
-    # El arrastre del plano que pase de 100 se paga como traslado manual,
-    # igual que en Poste cabria. En el consolidado esta misma partida recibe
-    # además el excedente de acarreo (*090633): son dos traslados distintos
-    # y se suman.
-    "poste": ["*090634"],
+    "poste": [
+        # El arrastre del plano que pase de 100 se paga como traslado manual,
+        # igual que en Poste cabria. En el consolidado esta misma partida
+        # recibe además el excedente de acarreo (*090633): son dos traslados
+        # distintos y se suman.
+        "*090634",
+        # El poste retirado siempre se lleva a disposición final.
+        "*090636",
+        # Poste provisional: se instala y se retira, y cada cosa vale dos
+        # tercios. La regla lo pregunta, porque no deja rastro en el material.
+        "*090482",
+        "*090468",
+        # Traslado de Caais 3x70, que sale de los metros del plano.
+        "*090163",
+    ],
 }
 
 
