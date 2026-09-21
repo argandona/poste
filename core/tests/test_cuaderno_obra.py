@@ -493,6 +493,78 @@ class DescargasTests(BaseAPITestCase):
                              'metros': m} for m in (10, 20, 30, 40, 5, 7, 8)])
         self.assertEqual([ws[f'{c}53'].value for c in 'IJKLMN'], [10, 20, 30, 40, 5, 15])
 
+    # ── Hoja Traslado - Acarreo ─────────────────────────────────────────────
+
+    def plano_con_arrastre(self, *metros):
+        self.liquidar()
+        PlanoSST.objects.create(
+            empresa=self.empresa, sst_codigo=self.sst.codigo,
+            usuario=self.capataz,
+            elementos=[{'tipo': 'cable', 'estado': 'A', 'metros': m}
+                       for m in metros])
+        wb = load_workbook(io.BytesIO(
+            self.get('/api/liquidaciones/excel/').content))
+        return wb['Traslado - Acarreo']
+
+    def fila(self, ws, numero):
+        return [ws[f'{c}{numero}'].value for c in 'CDEFGHIJK']
+
+    def test_cada_tramo_de_arrastre_va_en_su_columna(self):
+        ws = self.plano_con_arrastre(40, 25, 55)
+        self.assertEqual(self.fila(ws, 4),
+                         [40, 25, 55, None, None, None, None, None, None])
+
+    def test_el_bloque_de_acarreo_se_llena_solo_desde_la_fila_4(self):
+        """La plantilla ya trae C19 = C4, C20 = D4, ... : no se tocan."""
+        ws = self.plano_con_arrastre(40, 25, 55)
+        self.assertEqual([ws[f'C{f}'].value for f in (19, 20, 21)],
+                         ['=+C4', '=+D4', '=+E4'])
+        self.assertEqual(ws['M31'].value, 6)
+
+    def test_hasta_cien_metros_no_se_cobra_traslado(self):
+        ws = self.plano_con_arrastre(40, 25)
+        self.assertEqual(self.fila(ws, 5), [None] * 9)
+
+    def test_pasando_los_cien_se_repiten_los_tramos_con_su_descuento(self):
+        ws = self.plano_con_arrastre(40, 25, 55)
+        self.assertEqual(self.fila(ws, 5),
+                         [40, 25, 55, None, None, None, None, None, -100])
+
+    def test_justo_cien_metros_todavia_esta_incluido(self):
+        ws = self.plano_con_arrastre(60, 40)
+        self.assertEqual(self.fila(ws, 5), [None] * 9)
+
+    def test_con_mas_tramos_que_columnas_la_ultima_se_lleva_el_resto(self):
+        ws = self.plano_con_arrastre(*([10] * 11))
+        fila4 = self.fila(ws, 4)
+        self.assertEqual(fila4[:8], [10] * 8)
+        self.assertEqual(fila4[8], 30)          # los tres que sobran
+        self.assertEqual(sum(v for v in fila4 if v), 110)
+
+    def test_en_la_fila_de_cobro_el_descuento_no_pisa_un_tramo(self):
+        """K5 es del descuento, así que esa fila tiene una columna menos."""
+        ws = self.plano_con_arrastre(*([20] * 9))
+        fila5 = self.fila(ws, 5)
+        self.assertEqual(fila5[:7], [20] * 7)
+        self.assertEqual(fila5[7], 40)          # los dos que sobran
+        self.assertEqual(fila5[8], -100)
+
+    def test_sin_arrastre_la_hoja_queda_como_estaba(self):
+        ws = self.plano_con_arrastre()
+        self.assertEqual(self.fila(ws, 4), [None] * 9)
+        self.assertEqual(self.fila(ws, 5), [None] * 9)
+
+    def test_los_cables_trasladados_no_son_arrastre(self):
+        self.liquidar()
+        PlanoSST.objects.create(
+            empresa=self.empresa, sst_codigo=self.sst.codigo,
+            usuario=self.capataz,
+            elementos=[{'tipo': 'cable', 'estado': 'T',
+                        'descripcion': 'Caais 3x16', 'metros': 120}])
+        wb = load_workbook(io.BytesIO(
+            self.get('/api/liquidaciones/excel/').content))
+        self.assertEqual(self.fila(wb['Traslado - Acarreo'], 4), [None] * 9)
+
     # ── El Excel cobra lo mismo que el consolidado ──────────────────────────
 
     def _tipo_poste(self):

@@ -10,6 +10,10 @@ formatos y las demás hojas quedan como vienen.
 - Cables: los metros de cable de hasta 35 mm2 trasladado, un tramo del plano
   por vano, desde I53 hacia la derecha.
 - Vereda: largo y ancho de cada paño del plano, desde C5 y D5 hacia abajo.
+- Traslado - Acarreo: los tramos de arrastre del poste, uno por columna, en la
+  fila 4 (lo ejecutado) y en la fila 5 (lo que se cobra, con el descuento de
+  los 100 metros incluidos). El bloque de acarreo de abajo se llena solo: la
+  plantilla trae C19 = C4, C20 = D4, y así.
 
 Lo que la plantilla no trae listado se agrega en las filas libres de cada hoja.
 """
@@ -32,6 +36,15 @@ CABLES_VANOS = ['I', 'J', 'K', 'L', 'M', 'N']
 # Los calibres de hasta 35 mm2, como aparecen en la descripción del plano:
 # "3x16" también encuentra al "3x16+1x16".
 CABLES_HASTA_35 = ('2x16', '3x16', '3x35')
+# Hoja Traslado - Acarreo. La fila 4 es el traslado del poste retirado y la 5
+# el del instalado; de C a K van los adicionales y L suma la fila.
+TRASLADO_EJECUTADO = 4
+TRASLADO_COBRADO = 5
+TRASLADO_COLUMNAS = ('C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K')
+# El cambio de poste ya trae 100 metros: el descuento va al final de la fila.
+TRASLADO_INCLUIDO = 100
+TRASLADO_DESCUENTO = 'K5'
+
 # Hoja Vereda: un paño por fila.
 VEREDA_PRIMERA, VEREDA_ULTIMA = 5, 218
 
@@ -81,6 +94,7 @@ def generar_excel_liquidacion(encabezado, materiales, partidas, elementos_plano=
     _llenar_mano_de_obra(wb['MANO DE OBRA'], partidas)
     _llenar_cables(wb['Cables'], elementos_plano)
     _llenar_veredas(wb['Vereda'], elementos_plano)
+    _llenar_traslado_acarreo(wb['Traslado - Acarreo'], elementos_plano)
 
     buffer = io.BytesIO()
     wb.save(buffer)
@@ -151,6 +165,41 @@ def _llenar_cables(ws, elementos_plano):
     for i, metros in enumerate(tramos):
         celda = f'{CABLES_VANOS[min(i, ultimo)]}{CABLES_FILA}'
         ws[celda] = (ws[celda].value or 0) + metros if i > ultimo else metros
+
+
+def tramos_de_arrastre(elementos_plano):
+    """Los metros de cada tramo de arrastre dibujado en el plano."""
+    return [float(e.get('metros') or 0) for e in elementos_plano
+            if e.get('tipo') == 'cable' and e.get('estado') == 'A'
+            and float(e.get('metros') or 0) > 0]
+
+
+def _escribir_tramos(ws, fila, columnas, tramos):
+    """Un tramo por columna. Si hay más tramos que columnas, la última se lleva
+    la suma de lo que sobra, para que el total de la fila siga siendo el del
+    plano."""
+    ultima = len(columnas) - 1
+    for i, metros in enumerate(tramos):
+        celda = f'{columnas[min(i, ultima)]}{fila}'
+        ws[celda] = (ws[celda].value or 0) + metros if i > ultima else metros
+
+
+def _llenar_traslado_acarreo(ws, elementos_plano):
+    """El arrastre del poste: lo ejecutado arriba y lo cobrable debajo.
+
+    Los primeros 100 metros van incluidos en el cambio de poste, así que la
+    fila de cobro solo se escribe cuando el total los pasa, y el descuento va
+    en K5. El bloque de acarreo de abajo no se toca: la plantilla lo calcula
+    desde la fila 4 y lo multiplica por los seis viajes."""
+    tramos = tramos_de_arrastre(elementos_plano)
+    if not tramos:
+        return
+    _escribir_tramos(ws, TRASLADO_EJECUTADO, TRASLADO_COLUMNAS, tramos)
+    if sum(tramos) > TRASLADO_INCLUIDO:
+        # K5 queda para el descuento, así que la fila de cobro tiene una
+        # columna menos que la de arriba.
+        _escribir_tramos(ws, TRASLADO_COBRADO, TRASLADO_COLUMNAS[:-1], tramos)
+        ws[TRASLADO_DESCUENTO] = -TRASLADO_INCLUIDO
 
 
 def _llenar_veredas(ws, elementos_plano):
