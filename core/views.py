@@ -13,76 +13,12 @@ def con_rol(*roles):
     return Q(rol_id__in=roles) | Q(rol_secundario_id__in=roles)
 
 
-def _norm_txt(s):
-    s = (s or '').lower().strip()
-    s = ''.join(c for c in unicodedata.normalize('NFD', s)
-                if unicodedata.category(c) != 'Mn')
-    return ' '.join(s.split())
+from .inclusiones import (
+    INCLUSIONES_CONSOLIDADO, consolidar_partidas, partidas_cobradas,
+    norm_actividad as _norm_txt,
+)
 
 
-# Reglas de "lo ya incluido" en el paquete de cambio de poste, por actividad.
-# Cobrado = max(0, real - num_cambios * incluido_por_unidad).
-INCLUSIONES_CONSOLIDADO = {
-    'cambio de poste inaccesible subterraneo': {
-        'paquete': ['*090470', '*090471'],
-        # Valor entero -> se multiplica por N (total de cambios de poste).
-        # Dict {'segun': partida, 'cantidad': v} -> se multiplica por la cantidad
-        # de esa partida específica del paquete (ej. solo *090470 con vereda).
-        'incluidos': {
-            '*090633': 100,   # el cambio de poste ya incluye 100 de acarreo
-            '*091840': {'segun': '*090470', 'cantidad': 2},  # 2 incluidos por cambio CON vereda
-            # Cambiar el poste ya incluye subirse a él y escalarlo, igual que
-            # en cabria aérea. En esta actividad casi nunca se liquidan; el
-            # descuento está por si alguna vez se liquidan.
-            '*091240': 1,     # subida a poste
-            '*090238': 1,     # escalamiento con escalera
-        },
-        # Desde el 2026-09-20 el alumbrado de esta actividad es el mismo tipo
-        # de trabajo que el de cabria aérea, así que trae también el conector
-        # *090810. Se cuenta por grupos, igual que allá: el paquete incluye
-        # dos empalmes sea del tipo que sea, y una luminaria y un pastoral,
-        # se hayan instalado, retirado o trasladado.
-        'incluidos_grupo': [
-            {'partidas': ['*091608', '*090810'], 'cantidad': 2},
-            {'partidas': ['*091320', '*091316', '*091322'], 'cantidad': 1},
-            {'partidas': ['*091346', '*091357', '*091356'], 'cantidad': 1},
-        ],
-        # Derivación: el excedente de acarreo se cobra como traslado manual.
-        # origen (*090633) ÷ divisor; si supera umbral*N, el sobrante va a destino.
-        'derivar': {
-            'origen': '*090633', 'destino': '*090634',
-            'divisor': Decimal('6'), 'umbral': 100,
-        },
-    },
-    'cambio de poste inacc. cabria aereo': {
-        'paquete': ['*090470', '*090471'],
-        'incluidos': {
-            '*090633': 100,   # acarreo para cimentación
-            '*091840': 2,     # rotura de vereda
-            '*091240': 1,     # subida a poste
-            '*090238': 1,     # escalamiento: cambiar el poste ya lo incluye
-            # Cada retenida, sea violín anclada o templador aéreo, ya trae
-            # incluido su perno de anclaje: no se cobra dos veces si además
-            # se liquidó en ferretería.
-            '*090392': {'segun': ['*090310', '*090320'], 'cantidad': 1},
-        },
-        # Grupos que comparten una misma cantidad incluida: el paquete trae
-        # dos empalmes, sin importar de cuál de los dos tipos, y una luminaria
-        # y un pastoral, se hayan instalado, retirado o trasladado.
-        'incluidos_grupo': [
-            {'partidas': ['*091608', '*090810'], 'cantidad': 2},
-            {'partidas': ['*091320', '*091316', '*091322'], 'cantidad': 1},
-            {'partidas': ['*091346', '*091357', '*091356'], 'cantidad': 1},
-        ],
-    },
-}
-
-# La actividad subterránea se renombró el 2026-09-20 a "Cambio de poste inacc.
-# cabria subterraneo". Sus descuentos de "lo ya incluido" son los mismos: el
-# poste sigue siendo el suyo, solo cambió el nombre. Valen los dos mientras
-# queden bases sin renombrar.
-INCLUSIONES_CONSOLIDADO['cambio de poste inacc. cabria subterraneo'] = \
-    INCLUSIONES_CONSOLIDADO['cambio de poste inaccesible subterraneo']
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models, transaction
 from rest_framework import viewsets, status, permissions
@@ -1806,6 +1742,9 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
 
         sst, datos = self._sst_liquidada(request)
         codigo = sst.codigo or sst.sst
+        # La mano de obra va con lo que se COBRA, no con lo que se liquidó: el
+        # paquete de cambio de poste ya incluye parte de ese trabajo y no se
+        # cobra dos veces. Es la misma columna que muestra el consolidado.
         contenido = generar_excel_liquidacion({
             'sst': codigo,
             'actividad': datos.actividad,
@@ -1813,7 +1752,7 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
             'fecha': sst.fecha_ejecucion,
             'contratista': sst.empresa.nombre if sst.empresa_id else '',
             'capataz': datos.capataz,
-        }, datos.materiales, datos.partidas, datos.elementos_plano)
+        }, datos.materiales, partidas_cobradas(sst), datos.elementos_plano)
         resp = HttpResponse(
             contenido,
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
@@ -1891,15 +1830,17 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
         # 2) Descuento POR POSTE, agregado por SST.
         ssts = {}
         _mo_cache = {}
+
+        def buscar_partida(codigo):
+            if codigo not in _mo_cache:
+                _mo_cache[codigo] = ManoDeObra.objects.filter(
+                    partida=codigo).first()
+            return _mo_cache[codigo]
+
         for (sst_cod, _sum), g in postes.items():
-            regla = INCLUSIONES_CONSOLIDADO.get(_norm_txt(g['act']))
-            num = Decimal('0')
-            if regla:
-                for pc in regla['paquete']:
-                    if pc in g['partidas']:
-                        num += g['partidas'][pc]['cantidad']
             agg = ssts.setdefault(sst_cod, {'act': g['act'], 'cambios': Decimal('0'),
-                                            'partidas': {}, 'postes': []})
+                                            'partidas': {}, 'postes': [],
+                                            'calculo': []})
             # Cada poste con lo que se le liquidó: es por donde se entra a
             # corregir una liquidación desde el consolidado.
             agg['postes'].append({
@@ -1916,72 +1857,14 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
                     for liq in g['liquidaciones']
                 ],
             })
-            if regla:
+            if _norm_txt(g['act']) in INCLUSIONES_CONSOLIDADO:
                 agg['act'] = g['act']
-            agg['cambios'] += num
-            for pc, info in g['partidas'].items():
-                real = info['cantidad']
-                incl = Decimal('0')
-                cfg = regla['incluidos'].get(pc) if regla else None
-                if cfg is not None:
-                    if isinstance(cfg, dict):
-                        # 'segun' puede ser una partida o varias que suman.
-                        segun = cfg['segun']
-                        claves = segun if isinstance(segun, (list, tuple)) else [segun]
-                        base = sum(
-                            (g['partidas'].get(k, {}).get('cantidad', Decimal('0'))
-                             for k in claves),
-                            Decimal('0'))
-                        incl = base * Decimal(cfg['cantidad'])
-                    else:
-                        incl = num * Decimal(cfg)
-                cobra = real - incl
-                if cobra < 0:
-                    cobra = Decimal('0')
-                pe = agg['partidas'].setdefault(pc, {'mo': info['mo'], 'real': Decimal('0'),
-                                                     'incl': Decimal('0'), 'cobra': Decimal('0')})
-                pe['real'] += real
-                pe['incl'] += incl
-                pe['cobra'] += cobra
+            # El descuento se calcula por poste, con la actividad de ese poste.
+            agg['calculo'].append((_norm_txt(g['act']), g['partidas']))
 
-            # Grupos con cantidad compartida: el paquete incluye N unidades
-            # repartidas entre varias partidas, no N de cada una.
-            for grupo in (regla.get('incluidos_grupo') if regla else None) or []:
-                bolsa = num * Decimal(grupo['cantidad'])
-                for pc in grupo['partidas']:
-                    if bolsa <= 0:
-                        break
-                    info = g['partidas'].get(pc)
-                    if info is None:
-                        continue
-                    pe = agg['partidas'][pc]
-                    incl = min(info['cantidad'], bolsa)
-                    bolsa -= incl
-                    pe['incl'] += incl
-                    pe['cobra'] -= incl
-                    if pe['cobra'] < 0:
-                        pe['cobra'] = Decimal('0')
-
-            # Derivación: excedente de acarreo (*090633 ÷ 6) → traslado manual (*090634).
-            deriv = regla.get('derivar') if regla else None
-            if deriv and deriv['origen'] in g['partidas']:
-                metrado = g['partidas'][deriv['origen']]['cantidad']
-                q = metrado / deriv['divisor']
-                umbral = num * Decimal(deriv['umbral']) if num > 0 else Decimal('0')
-                cobra_d = q - umbral
-                if cobra_d < 0:
-                    cobra_d = Decimal('0')
-                if deriv['destino'] not in _mo_cache:
-                    _mo_cache[deriv['destino']] = ManoDeObra.objects.filter(
-                        partida=deriv['destino']).first()
-                mo_d = _mo_cache[deriv['destino']]
-                if mo_d is not None:
-                    pe = agg['partidas'].setdefault(deriv['destino'],
-                        {'mo': mo_d, 'real': Decimal('0'), 'incl': Decimal('0'),
-                         'cobra': Decimal('0')})
-                    pe['real'] += q
-                    pe['incl'] += umbral
-                    pe['cobra'] += cobra_d
+        for agg in ssts.values():
+            agg['partidas'], agg['cambios'] = consolidar_partidas(
+                agg.pop('calculo'), INCLUSIONES_CONSOLIDADO, buscar_partida)
 
         # 3) Salida por SST.
         resultado = []
