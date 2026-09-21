@@ -32,7 +32,61 @@ TRASLADO_PASTORAL = '*091356'
 TRASLADO_LUMINARIA = '*091322'
 CONEXIONES_TRASLADADAS = '*093081'
 
-TRABAJOS_CABLE = {'T': 'Traslado', 'I': 'Instalación', 'R': 'Retiro'}
+# Los dos postes del catálogo, como se nombran en el cuaderno. La descripción
+# del catálogo trae la medida completa ("7,5 / 150 / 150 / 270 P.A.P. ..."),
+# que en obra nadie escribe así.
+POSTES = {
+    '5331596': 'PRFV 7/150',
+    '5331616': 'PRFV 9/200',
+}
+
+# Cimentar el poste se liquida con cualquiera de estas dos.
+CIMENTACION = ('*094918', '*090482')
+
+# La subida al poste: la partida, o el cable bipolar cuando el metrado es el de
+# una subida y no el de un tendido.
+SUBIDA_PARTIDA = '*091240'
+SUBIDA_CABLE = '5031165'
+SUBIDA_MIN, SUBIDA_MAX = Decimal('1'), Decimal('13')
+
+MENSULA_DOBLE = '*098670'
+DIAGONAL = '*090060'
+ABRAZADERA_4 = '*090065'
+# Lo instalado, por su partida. El alumbrado va primero porque es lo que se
+# monta en el poste; la acometida, después. La cantidad solo se escribe cuando
+# hay más de uno: "Se instaló luminaria" se lee mejor que "luminaria (1)".
+ALUMBRADO_INSTALADO = [
+    ('*091320', 'Se instaló luminaria'),
+    ('*091346', 'Se instaló pastoral'),
+]
+INSTALADO_POR_PARTIDA = [
+    ('*093242', 'Se instaló caja de distribución'),
+    ('*093045', 'Se instaló abrazadera tipo corona con ganchos'),
+]
+
+# Lo retirado se sabe por el recupero. El catálogo de recuperos se escribe a
+# mano, así que se busca por texto y con sus variantes: (nombre, palabras,
+# palabras que lo descartan).
+RETIRADOS = [
+    ('luminaria', ('luminaria', 'farola', 'falora', 'lampara'), ()),
+    ('pastoral', ('pastoral',), ('abrazadera',)),
+    ('caja de distribución', ('caja',), ()),
+    ('abrazadera tipo corona con ganchos', ('corona',), ()),
+]
+
+# Retenidas: se escriben por el tipo de trabajo que el capataz marcó, no por la
+# partida, porque la partida es la misma para la simple y la violín.
+RETENIDAS = [
+    ('retenida tipo "y"', 'Se instaló retenida tipo "Y"'),
+    ('violin', 'Se instaló retenida tipo violín'),
+    ('retenida simple', 'Se instaló retenida tipo simple'),
+]
+
+ACARREO = '*090633'
+ARRASTRE_PENDIENTE = '*090632'
+ARRASTRE_PLANO = '*090630'
+# Cada tramo de acarreo se recorre seis veces: ida y vuelta, tres veces.
+VIAJES_DE_ACARREO = 6
 
 
 def normalizar(texto):
@@ -65,6 +119,7 @@ class Liquidado:
     recuperos: list = field(default_factory=list)    # [Item]
     elementos_plano: list = field(default_factory=list)
     postes: list = field(default_factory=list)       # números asignados
+    tipos: list = field(default_factory=list)        # tipos de trabajo marcados
     conexiones: list = field(default_factory=list)   # comentarios escritos
     capataz: str = ''
     actividad: str = ''
@@ -72,6 +127,17 @@ class Liquidado:
     def partida(self, codigo):
         return sum((p.cantidad for p in self.partidas if p.codigo == codigo),
                    Decimal('0'))
+
+    def material(self, matricula):
+        return sum((m.cantidad for m in self.materiales
+                    if m.codigo == matricula), Decimal('0'))
+
+    def hay_tipo(self, palabra):
+        """Si se liquidó un tipo de trabajo cuyo nombre trae esa palabra."""
+        return any(palabra in normalizar(t) for t in self.tipos)
+
+    def plano(self, tipo):
+        return [e for e in self.elementos_plano if e.get('tipo') == tipo]
 
 
 def reunir(sst):
@@ -95,7 +161,7 @@ def reunir(sst):
         .order_by('id_liquidacion'))
 
     materiales, partidas = {}, {}
-    conexiones = []
+    tipos, conexiones = [], []
     for liq in liquidaciones:
         for c in liq.materiales_consumidos.all():
             m = c.material
@@ -107,6 +173,8 @@ def reunir(sst):
             item = partidas.setdefault(
                 mo.partida, Item(mo.partida, mo.descripcion, Decimal('0'), mo.precio))
             item.cantidad += p.cantidad
+        if liq.tipo_trabajo.nombre not in tipos:
+            tipos.append(liq.tipo_trabajo.nombre)
         if liq.comentario.strip() and 'conexion' in normalizar(liq.tipo_trabajo.nombre):
             conexiones.append(liq.comentario.strip())
 
@@ -128,95 +196,208 @@ def reunir(sst):
         recuperos=[i for i in recuperos.values() if i.cantidad > 0],
         elementos_plano=list(plano.elementos) if plano else [],
         postes=[s.numero_suministro for s in suministros],
+        tipos=tipos,
         conexiones=conexiones,
         capataz=ultima.usuario.nombre if ultima else '',
         actividad=sst.actividad.nombre if sst.actividad_id else '',
     )
 
 
-def _con(items, palabras, excluyendo=()):
-    return [i for i in items
-            if any(p in normalizar(i.descripcion) for p in palabras)
-            and not any(e in normalizar(i.descripcion) for e in excluyendo)]
-
-
-def _lista(items):
-    return ', '.join(f'{i.descripcion} ({numero(i.cantidad)})' for i in items)
-
-
-# Lo que se cambia en el poste: qué se buscó en el recupero (lo retirado) y qué
-# en el material (lo instalado). El catálogo de recupero se escribe a mano, así
-# que se busca por texto y con sus variantes.
-CAMBIOS = [
-    ('luminaria', ('luminaria', 'farola', 'falora', 'lampara'), (), ('luminaria',), ()),
-    ('pastoral', ('pastoral',), ('abrazadera',), ('pastoral',), ('abrazadera',)),
-    ('caja de distribución', ('caja',), (), ('caja',), ()),
-    ('abrazadera tipo corona con ganchos', ('corona',), (), ('gancho',), ()),
-]
-
-
 def lineas_del_cuaderno(d):
     """El cuerpo del cuaderno, renglón por renglón, en el orden en que se
-    ejecuta la obra."""
+    ejecuta la obra: primero el poste, después lo que se le cuelga, y al final
+    los traslados, el acarreo y la vereda.
+
+    Cada renglón sale de algo que el capataz ya cargó: una partida liquidada,
+    un material, un tipo de trabajo marcado o un trazo del plano. Aquí no se
+    inventa nada ni se pregunta nada."""
     lineas = ['Por la presente se informa que la SST se ejecutó según lo detallado:']
 
+    _poste(d, lineas)
+    _postes_retirados(d, lineas)
+    _alumbrado_instalado(d, lineas)
+    _traslados_de_alumbrado(d, lineas)
+    _subida_al_poste(d, lineas)
+    _ferreteria(d, lineas)
+    _retenidas(d, lineas)
+    _retirados(d, lineas)
+    _cables(d, lineas)
+    _arrastre(d, lineas)
+    _acarreo(d, lineas)
+    _veredas(d, lineas)
+    _suministros_trasladados(d, lineas)
+
+    return lineas
+
+
+def _poste(d, lineas):
+    """El poste instalado, con su cimentación y el código que se le puso."""
     # Por el comienzo: "ABRAZADERA POSTE ..." también dice poste y no lo es.
-    postes_nuevos = [m for m in d.materiales
-                     if normalizar(m.descripcion).startswith('poste')]
+    puestos = [m for m in d.materiales
+               if m.codigo in POSTES or normalizar(m.descripcion).startswith('poste')]
+    if not puestos:
+        return
+    cimentado = any(d.partida(p) > 0 for p in CIMENTACION)
+    # Las figuras del plano no llevan `tipo`: se reconocen por su assetId.
     codigos = [str(e.get('codigo')) for e in d.elementos_plano
                if e.get('assetId') == 'poste_nuevo' and e.get('codigo')]
-    for poste in postes_nuevos:
-        texto = f'Se instaló poste {poste.descripcion}'
+    for poste in puestos:
+        texto = f'Se instaló {POSTES.get(poste.codigo, poste.descripcion)}'
+        if poste.cantidad > 1:
+            texto += f' ({numero(poste.cantidad)})'
+        if cimentado:
+            texto += ' Cimentado'
         if codigos:
             texto += f' con código {", ".join(codigos)}'
         lineas.append(texto)
-    if postes_nuevos or any(d.partida(p) > 0 for p in PARTIDAS_RETIRO_POSTE):
-        for n in d.postes:
-            lineas.append(f'Se retiró poste {n}')
 
-    if d.partida(TRASLADO_PASTORAL) > 0:
-        lineas.append('Se realizó traslado de pastoral existente')
-    if d.partida(TRASLADO_LUMINARIA) > 0:
-        lineas.append('Se realizó traslado de luminaria existente')
 
-    for nombre, rec, rec_no, mat, mat_no in CAMBIOS:
-        retirado = _con(d.recuperos, rec, rec_no)
-        instalado = _con(d.materiales, mat, mat_no)
-        if retirado and instalado:
-            lineas.append(f'Se realizó retiro e instalación de {nombre}: se retiró '
-                          f'{_lista(retirado)} y se instaló {_lista(instalado)}')
-        elif retirado:
-            lineas.append(f'Se retiró {nombre}: {_lista(retirado)}')
-        elif instalado:
-            lineas.append(f'Se instaló {nombre}: {_lista(instalado)}')
+def _postes_retirados(d, lineas):
+    """Los postes de la SST que salieron. Se sabe porque se puso uno nuevo o
+    porque se liquidó un retiro, que no siempre trae poste nuevo detrás."""
+    hay_nuevo = any(m.codigo in POSTES or normalizar(m.descripcion).startswith('poste')
+                    for m in d.materiales)
+    if not hay_nuevo and not any(d.partida(p) > 0 for p in PARTIDAS_RETIRO_POSTE):
+        return
+    for numero_poste in d.postes:
+        lineas.append(f'Se retiró poste {numero_poste}')
 
-    # Cables y arrastre, tramo por tramo, tal como están en el plano.
-    tramos = [e for e in d.elementos_plano if e.get('tipo') == 'cable']
-    for e in tramos:
-        trabajo = TRABAJOS_CABLE.get(e.get('estado'))
-        if trabajo and e.get('descripcion'):
-            lineas.append(f'{trabajo} {e["descripcion"]} {numero(e.get("metros"))} metros')
-    for e in tramos:
-        if e.get('estado') == 'A':
-            texto = f'Arrastre de poste {numero(e.get("metros"))} metros'
-            if e.get('pendiente') is True:
-                texto += ' en zona de pendiente mayor a 30° o escalera'
+
+def _alumbrado_instalado(d, lineas):
+    """La luminaria y el pastoral que se pusieron, por su partida."""
+    for codigo, texto in ALUMBRADO_INSTALADO:
+        cantidad = d.partida(codigo)
+        if cantidad <= 0:
+            continue
+        lineas.append(texto if cantidad == 1
+                      else f'{texto} ({numero(cantidad)})')
+
+
+def _traslados_de_alumbrado(d, lineas):
+    """Trasladar no consume ni recupera nada: se sabe por su partida."""
+    pastoral = d.partida(TRASLADO_PASTORAL) > 0
+    luminaria = d.partida(TRASLADO_LUMINARIA) > 0
+    if pastoral and luminaria:
+        lineas.append('Se trasladó pastoral + luminaria existente')
+    elif pastoral:
+        lineas.append('Se trasladó pastoral')
+    elif luminaria:
+        lineas.append('Se trasladó luminaria')
+
+
+def _subida_al_poste(d, lineas):
+    """La subida al poste, por su partida o por el metrado del cable bipolar.
+
+    Ese cable se usa para dos cosas: la subida y el tendido. Lo que las separa
+    es el metrado — una subida son unos pocos metros, un tendido son muchos."""
+    metros = d.material(SUBIDA_CABLE)
+    es_subida = SUBIDA_MIN < metros < SUBIDA_MAX
+    if d.partida(SUBIDA_PARTIDA) <= 0 and not es_subida:
+        return
+    texto = 'Se instaló Subida AP N2XY 2-1x6'
+    if metros > 0:
+        texto += f' ({numero(metros)} metros)'
+    lineas.append(texto)
+
+
+def _ferreteria(d, lineas):
+    if d.partida(MENSULA_DOBLE) > 0:
+        lineas.append('Se instaló ménsula doble de madera')
+    diagonal = d.partida(DIAGONAL)
+    if diagonal > 0:
+        lineas.append(f'Se instaló diagonal de acero ({numero(diagonal)})')
+    abrazadera = d.partida(ABRAZADERA_4)
+    if abrazadera > 0:
+        lineas.append(f'Se instaló abrazadera de 4 pernos ({numero(abrazadera)})')
+    for codigo, texto in INSTALADO_POR_PARTIDA:
+        if d.partida(codigo) > 0:
             lineas.append(texto)
-    # Los cables de comunicación no tienen metros: con que haya uno en el plano
-    # se escribe una vez, igual que su partida vale 1.
+
+
+def _retenidas(d, lineas):
+    """Se escriben por el tipo de trabajo marcado: la partida no distingue la
+    retenida simple de la violín."""
+    for palabra, texto in RETENIDAS:
+        if d.hay_tipo(palabra):
+            lineas.append(texto)
+
+
+def _retirados(d, lineas):
+    """Lo que se bajó y volvió al almacén, según la pestaña de Recupero."""
+    for nombre, palabras, excluyendo in RETIRADOS:
+        bajado = [r for r in d.recuperos
+                  if any(p in normalizar(r.descripcion) for p in palabras)
+                  and not any(e in normalizar(r.descripcion) for e in excluyendo)]
+        if bajado:
+            detalle = ', '.join(f'{r.descripcion} ({numero(r.cantidad)})'
+                                for r in bajado)
+            lineas.append(f'Se retiró {nombre}: {detalle}')
+
+
+def _suministros_trasladados(d, lineas):
+    """Las acometidas que se movieron. El capataz anota los suministros en el
+    comentario del tipo de trabajo, y van tal cual."""
+    trasladadas = d.partida(CONEXIONES_TRASLADADAS)
+    if trasladadas <= 0 and not d.conexiones:
+        return
+    texto = 'Se realizó traslado de '
+    if trasladadas > 0:
+        texto += (f'{numero(trasladadas)} suministro'
+                  f'{"" if trasladadas == 1 else "s"}')
+    else:
+        texto += 'suministros'
+    if d.conexiones:
+        texto += f': {"; ".join(d.conexiones)}'
+    lineas.append(texto)
+
+
+def _cables(d, lineas):
+    """Los cables trasladados, uno por uno, tal como están en el plano."""
+    tramos = d.plano('cable')
+    for e in tramos:
+        if e.get('estado') == 'T' and e.get('descripcion'):
+            lineas.append(f'Se trasladó {e["descripcion"]} '
+                          f'{numero(e.get("metros"))} metros')
+    # Los de comunicación no llevan tipo ni metros: con que haya uno se escribe
+    # una vez, igual que su partida vale 1.
     if any(e.get('estado') == 'C' for e in tramos):
         lineas.append('Se trasladó cables de comunicación')
 
-    trasladadas = d.partida(CONEXIONES_TRASLADADAS)
-    if trasladadas > 0 or d.conexiones:
-        texto = 'Se realizó traslado de '
-        texto += (f'{numero(trasladadas)} suministro'
-                  f'{"" if trasladadas == 1 else "s"}' if trasladadas > 0
-                  else 'suministros')
-        if d.conexiones:
-            texto += f': {"; ".join(d.conexiones)}'
-        lineas.append(texto)
-    return lineas
+
+def _arrastre(d, lineas):
+    for e in d.plano('cable'):
+        if e.get('estado') != 'A':
+            continue
+        zona = ('en zona de pendiente mayor a 30° o escalera'
+                if e.get('pendiente') is True else 'en plano')
+        lineas.append('Se realizó arrastre de poste '
+                      f'{numero(e.get("metros"))} metros {zona}')
+
+
+def _acarreo(d, lineas):
+    """El acarreo se recorre seis veces, así que el total es el tramo por seis.
+
+    El tramo es el mismo que se arrastró el poste: las dos partidas del
+    arrastre, sumadas."""
+    if d.partida(ACARREO) <= 0:
+        return
+    tramo = d.partida(ARRASTRE_PENDIENTE) + d.partida(ARRASTRE_PLANO)
+    total = tramo * VIAJES_DE_ACARREO
+    lineas.append(
+        f'Se realizó acarreo de equipos y herramientas por un tramo de '
+        f'{numero(tramo)} metros por {VIAJES_DE_ACARREO} viajes dando en total '
+        f'{numero(total)} metros para lo cual se utilizó la vía más corta')
+
+
+def _veredas(d, lineas):
+    """Un renglón por paño reparado, con sus medidas y su área."""
+    for pano in d.plano('vereda'):
+        largo = Decimal(str(pano.get('largo') or 0))
+        ancho = Decimal(str(pano.get('ancho') or 0))
+        if largo <= 0 or ancho <= 0:
+            continue
+        lineas.append(f'Se reparó vereda de 10cm {numero(largo)} x '
+                      f'{numero(ancho)} = {numero(largo * ancho)}')
 
 
 # ── PDF ──────────────────────────────────────────────────────────────────────

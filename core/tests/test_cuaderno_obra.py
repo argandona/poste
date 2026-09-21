@@ -24,107 +24,326 @@ def item(descripcion, cantidad=1, codigo='X'):
     return Item(codigo, descripcion, Decimal(str(cantidad)))
 
 
+def partida(codigo, cantidad=1):
+    return Item(codigo, f'PARTIDA {codigo}', Decimal(str(cantidad)))
+
+
+def cable(estado, metros=10, descripcion='CAAIS 3x16', pendiente=None):
+    e = {'tipo': 'cable', 'estado': estado, 'metros': metros,
+         'descripcion': descripcion}
+    if pendiente is not None:
+        e['pendiente'] = pendiente
+    return e
+
+
+def vereda(largo, ancho):
+    return {'tipo': 'vereda', 'largo': largo, 'ancho': ancho}
+
+
 class LineasDelCuadernoTests(BaseAPITestCase):
+    """El cuerpo del cuaderno: cada renglón cuando corresponde, y no cuando no.
+
+    Las reglas las dio el usuario el 2026-09-21, una por una; los textos son
+    los suyos.
+    """
 
     def test_empieza_con_la_frase_del_formato(self):
         self.assertEqual(
             lineas_del_cuaderno(Liquidado())[0],
             'Por la presente se informa que la SST se ejecutó según lo detallado:')
 
-    def test_poste_instalado_con_el_codigo_del_plano_y_el_retirado(self):
-        d = Liquidado(
-            materiales=[item('POSTE DE POLIESTER 9 / 200')],
-            elementos_plano=[{'assetId': 'poste_nuevo', 'codigo': '123456789'},
-                             {'assetId': 'poste_retirado', 'codigo': '999'}],
-            postes=['P-100'])
+    def test_sin_nada_liquidado_solo_queda_la_frase(self):
+        self.assertEqual(len(lineas_del_cuaderno(Liquidado())), 1)
+
+    # ── El poste ────────────────────────────────────────────────────────────
+
+    def test_el_poste_se_nombra_como_en_obra(self):
+        d = Liquidado(materiales=[item('POSTE DE POLIESTER 7,5 / 150',
+                                       codigo='5331596')])
+        self.assertIn('Se instaló PRFV 7/150', lineas_del_cuaderno(d))
+
+    def test_el_poste_de_nueve_metros(self):
+        d = Liquidado(materiales=[item('POSTE POLIESTER 9 / 200',
+                                       codigo='5331616')])
+        self.assertIn('Se instaló PRFV 9/200', lineas_del_cuaderno(d))
+
+    def test_cimentado_si_se_liquido_la_cimentacion(self):
+        d = Liquidado(materiales=[item('POSTE', codigo='5331616')],
+                      partidas=[partida('*094918')])
+        self.assertIn('Se instaló PRFV 9/200 Cimentado', lineas_del_cuaderno(d))
+
+    def test_cimentado_tambien_con_la_instalacion_con_cimentacion(self):
+        d = Liquidado(materiales=[item('POSTE', codigo='5331616')],
+                      partidas=[partida('*090482')])
+        self.assertIn('Se instaló PRFV 9/200 Cimentado', lineas_del_cuaderno(d))
+
+    def test_sin_cimentacion_no_lo_dice(self):
+        d = Liquidado(materiales=[item('POSTE', codigo='5331616')])
         lineas = lineas_del_cuaderno(d)
-        self.assertIn('Se instaló poste POSTE DE POLIESTER 9 / 200 con código 123456789',
-                      lineas)
-        self.assertIn('Se retiró poste P-100', lineas)
+        self.assertIn('Se instaló PRFV 9/200', lineas)
+        self.assertFalse(any('Cimentado' in l for l in lineas))
+
+    def test_el_codigo_del_plano_va_al_final(self):
+        d = Liquidado(
+            materiales=[item('POSTE', codigo='5331616')],
+            partidas=[partida('*094918')],
+            elementos_plano=[{'assetId': 'poste_nuevo', 'codigo': '123456789'}])
+        self.assertIn('Se instaló PRFV 9/200 Cimentado con código 123456789',
+                      lineas_del_cuaderno(d))
 
     def test_la_abrazadera_de_poste_no_es_un_poste(self):
-        d = Liquidado(materiales=[item('ABRAZADERA POSTE C.A.150MMD.C/GANCHO')],
-                      postes=['P-100'])
-        lineas = lineas_del_cuaderno(d)
-        self.assertFalse(any(l.startswith('Se instaló poste') for l in lineas))
-        self.assertNotIn('Se retiró poste P-100', lineas)
+        d = Liquidado(materiales=[item('ABRAZADERA POSTE 150MM', codigo='6941170')])
+        self.assertFalse(any('Se instaló' in l for l in lineas_del_cuaderno(d)))
 
-    def test_traslados_de_pastoral_y_luminaria(self):
-        d = Liquidado(partidas=[item('x', 1, '*091356'), item('y', 1, '*091322')])
+    # ── Alumbrado instalado ─────────────────────────────────────────────────
+
+    def test_luminaria_instalada(self):
+        d = Liquidado(partidas=[partida('*091320')])
+        self.assertIn('Se instaló luminaria', lineas_del_cuaderno(d))
+
+    def test_pastoral_instalado(self):
+        d = Liquidado(partidas=[partida('*091346')])
+        self.assertIn('Se instaló pastoral', lineas_del_cuaderno(d))
+
+    def test_mas_de_uno_lleva_su_cantidad(self):
+        d = Liquidado(partidas=[partida('*091320', 2)])
+        self.assertIn('Se instaló luminaria (2)', lineas_del_cuaderno(d))
+
+    def test_instalar_y_trasladar_son_renglones_distintos(self):
+        d = Liquidado(partidas=[partida('*091320'), partida('*091322')])
         lineas = lineas_del_cuaderno(d)
-        self.assertIn('Se realizó traslado de pastoral existente', lineas)
-        self.assertIn('Se realizó traslado de luminaria existente', lineas)
+        self.assertIn('Se instaló luminaria', lineas)
+        self.assertIn('Se trasladó luminaria', lineas)
+        self.assertLess(lineas.index('Se instaló luminaria'),
+                        lineas.index('Se trasladó luminaria'))
+
+    # ── Traslados de alumbrado ──────────────────────────────────────────────
+
+    def test_pastoral_y_luminaria_van_en_un_solo_renglon(self):
+        d = Liquidado(partidas=[partida('*091356'), partida('*091322')])
+        self.assertIn('Se trasladó pastoral + luminaria existente',
+                      lineas_del_cuaderno(d))
+
+    def test_solo_el_pastoral(self):
+        d = Liquidado(partidas=[partida('*091356')])
+        self.assertIn('Se trasladó pastoral', lineas_del_cuaderno(d))
+
+    def test_solo_la_luminaria(self):
+        d = Liquidado(partidas=[partida('*091322')])
+        self.assertIn('Se trasladó luminaria', lineas_del_cuaderno(d))
 
     def test_sin_traslado_no_se_menciona(self):
-        lineas = lineas_del_cuaderno(Liquidado())
-        self.assertFalse(any('traslado de pastoral' in l for l in lineas))
+        self.assertFalse(
+            any('trasladó' in l for l in lineas_del_cuaderno(Liquidado())))
 
-    def test_retiro_e_instalacion_de_luminaria(self):
-        d = Liquidado(recuperos=[item('LUMINARIA DE 150 W')],
-                      materiales=[item('LUMINARIA LED 90W')])
+    # ── La subida al poste ──────────────────────────────────────────────────
+
+    def test_la_subida_por_su_partida(self):
+        d = Liquidado(partidas=[partida('*091240')])
+        self.assertIn('Se instaló Subida AP N2XY 2-1x6', lineas_del_cuaderno(d))
+
+    def test_la_subida_por_el_metrado_del_cable(self):
+        d = Liquidado(materiales=[item('CABLE N2XY 2 - 1 X 6MM2', 8,
+                                       codigo='5031165')])
+        self.assertIn('Se instaló Subida AP N2XY 2-1x6 (8 metros)',
+                      lineas_del_cuaderno(d))
+
+    def test_un_tendido_largo_no_es_una_subida(self):
+        d = Liquidado(materiales=[item('CABLE N2XY', 40, codigo='5031165')])
+        self.assertFalse(any('Subida' in l for l in lineas_del_cuaderno(d)))
+
+    def test_un_metro_suelto_tampoco(self):
+        d = Liquidado(materiales=[item('CABLE N2XY', 1, codigo='5031165')])
+        self.assertFalse(any('Subida' in l for l in lineas_del_cuaderno(d)))
+
+    def test_con_la_partida_y_el_cable_se_escribe_una_vez_con_su_metrado(self):
+        d = Liquidado(partidas=[partida('*091240')],
+                      materiales=[item('CABLE N2XY', 9, codigo='5031165')])
+        lineas = [l for l in lineas_del_cuaderno(d) if 'Subida' in l]
+        self.assertEqual(lineas, ['Se instaló Subida AP N2XY 2-1x6 (9 metros)'])
+
+    # ── Ferretería ──────────────────────────────────────────────────────────
+
+    def test_mensula_doble(self):
+        d = Liquidado(partidas=[partida('*098670')])
+        self.assertIn('Se instaló ménsula doble de madera', lineas_del_cuaderno(d))
+
+    def test_diagonal_con_su_cantidad(self):
+        d = Liquidado(partidas=[partida('*090060', 2)])
+        self.assertIn('Se instaló diagonal de acero (2)', lineas_del_cuaderno(d))
+
+    def test_abrazadera_de_cuatro_pernos_con_su_cantidad(self):
+        d = Liquidado(partidas=[partida('*090065', 3)])
+        self.assertIn('Se instaló abrazadera de 4 pernos (3)',
+                      lineas_del_cuaderno(d))
+
+    # ── Retenidas: van por el tipo de trabajo marcado ───────────────────────
+
+    def test_retenida_tipo_y(self):
+        d = Liquidado(tipos=['Retenida Tipo "Y"'])
+        self.assertIn('Se instaló retenida tipo "Y"', lineas_del_cuaderno(d))
+
+    def test_retenida_violin(self):
+        d = Liquidado(tipos=['Retenida Violin'])
+        self.assertIn('Se instaló retenida tipo violín', lineas_del_cuaderno(d))
+
+    def test_retenida_simple(self):
+        d = Liquidado(tipos=['Retenida simple'])
+        self.assertIn('Se instaló retenida tipo simple', lineas_del_cuaderno(d))
+
+    def test_dos_retenidas_dos_renglones(self):
+        d = Liquidado(tipos=['Retenida simple', 'Retenida Violin'])
+        lineas = lineas_del_cuaderno(d)
+        self.assertIn('Se instaló retenida tipo simple', lineas)
+        self.assertIn('Se instaló retenida tipo violín', lineas)
+
+    def test_otro_tipo_de_trabajo_no_escribe_retenida(self):
+        d = Liquidado(tipos=['Alumbrado cabria', 'Poste cabria'])
+        self.assertFalse(any('retenida' in l for l in lineas_del_cuaderno(d)))
+
+    # ── Cables ──────────────────────────────────────────────────────────────
+
+    def test_los_cables_trasladados_van_uno_por_uno(self):
+        d = Liquidado(elementos_plano=[
+            cable('T', 25, 'CAAIS 3x16'),
+            cable('T', 40, 'CAAIS 3x70'),
+        ])
+        lineas = lineas_del_cuaderno(d)
+        self.assertIn('Se trasladó CAAIS 3x16 25 metros', lineas)
+        self.assertIn('Se trasladó CAAIS 3x70 40 metros', lineas)
+
+    def test_lo_instalado_o_existente_no_se_escribe(self):
+        d = Liquidado(elementos_plano=[cable('I'), cable('E'), cable('R')])
+        self.assertEqual(len(lineas_del_cuaderno(d)), 1)
+
+    def test_cables_de_comunicacion_una_sola_vez(self):
+        d = Liquidado(elementos_plano=[cable('C', 0, ''), cable('C', 0, '')])
+        lineas = lineas_del_cuaderno(d)
+        self.assertEqual(lineas.count('Se trasladó cables de comunicación'), 1)
+
+    # ── Arrastre ────────────────────────────────────────────────────────────
+
+    def test_arrastre_en_pendiente(self):
+        d = Liquidado(elementos_plano=[cable('A', 20, '', pendiente=True)])
+        self.assertIn('Se realizó arrastre de poste 20 metros en zona de '
+                      'pendiente mayor a 30° o escalera', lineas_del_cuaderno(d))
+
+    def test_arrastre_en_plano(self):
+        d = Liquidado(elementos_plano=[cable('A', 35, '', pendiente=False)])
+        self.assertIn('Se realizó arrastre de poste 35 metros en plano',
+                      lineas_del_cuaderno(d))
+
+    def test_arrastre_sin_responder_se_toma_como_plano(self):
+        d = Liquidado(elementos_plano=[cable('A', 12, '')])
+        self.assertIn('Se realizó arrastre de poste 12 metros en plano',
+                      lineas_del_cuaderno(d))
+
+    # ── Acarreo ─────────────────────────────────────────────────────────────
+
+    def test_el_acarreo_multiplica_el_tramo_por_seis_viajes(self):
+        d = Liquidado(partidas=[partida('*090633', 100),
+                                partida('*090630', 40),
+                                partida('*090632', 25)])
         self.assertIn(
-            'Se realizó retiro e instalación de luminaria: se retiró '
-            'LUMINARIA DE 150 W (1) y se instaló LUMINARIA LED 90W (1)',
-            lineas_del_cuaderno(d))
+            'Se realizó acarreo de equipos y herramientas por un tramo de 65 '
+            'metros por 6 viajes dando en total 390 metros para lo cual se '
+            'utilizó la vía más corta', lineas_del_cuaderno(d))
+
+    def test_sin_acarreo_liquidado_no_se_escribe(self):
+        d = Liquidado(partidas=[partida('*090630', 40)])
+        self.assertFalse(any('acarreo' in l for l in lineas_del_cuaderno(d)))
+
+    # ── Vereda ──────────────────────────────────────────────────────────────
+
+    def test_un_renglon_por_pano_reparado(self):
+        d = Liquidado(elementos_plano=[vereda(2, 1.5), vereda(3, 1)])
+        lineas = lineas_del_cuaderno(d)
+        self.assertIn('Se reparó vereda de 10cm 2 x 1.5 = 3', lineas)
+        self.assertIn('Se reparó vereda de 10cm 3 x 1 = 3', lineas)
+
+    def test_un_pano_sin_medidas_no_se_escribe(self):
+        d = Liquidado(elementos_plano=[vereda(0, 0)])
+        self.assertEqual(len(lineas_del_cuaderno(d)), 1)
+
+
+    # ── Los postes que salieron ─────────────────────────────────────────────
+
+    def test_poner_un_poste_significa_que_salio_el_viejo(self):
+        d = Liquidado(materiales=[item('POSTE', codigo='5331616')],
+                      postes=['900000123'])
+        self.assertIn('Se retiró poste 900000123', lineas_del_cuaderno(d))
+
+    def test_un_retiro_sin_poste_nuevo_tambien_se_escribe(self):
+        d = Liquidado(partidas=[partida('*090468')], postes=['900000123'])
+        self.assertIn('Se retiró poste 900000123', lineas_del_cuaderno(d))
+
+    def test_sin_poste_ni_retiro_no_se_escribe(self):
+        d = Liquidado(postes=['900000123'])
+        self.assertFalse(any('Se retiró poste' in l for l in lineas_del_cuaderno(d)))
+
+    # ── Lo instalado en la acometida ────────────────────────────────────────
+
+    def test_caja_de_distribucion_por_su_partida(self):
+        d = Liquidado(partidas=[partida('*093242')])
+        self.assertIn('Se instaló caja de distribución', lineas_del_cuaderno(d))
+
+    def test_corona_con_ganchos_por_su_partida(self):
+        d = Liquidado(partidas=[partida('*093045')])
+        self.assertIn('Se instaló abrazadera tipo corona con ganchos',
+                      lineas_del_cuaderno(d))
+
+    # ── Lo que se bajó, según el recupero ───────────────────────────────────
+
+    def test_la_luminaria_retirada_con_sus_variantes(self):
+        d = Liquidado(recuperos=[item('LUMINARIA DE 150 W'),
+                                 item('FALORA COMPLETA', 2)])
+        self.assertIn('Se retiró luminaria: LUMINARIA DE 150 W (1), '
+                      'FALORA COMPLETA (2)', lineas_del_cuaderno(d))
+
+    def test_el_pastoral_retirado(self):
+        d = Liquidado(recuperos=[item('PASTORAL JP')])
+        self.assertIn('Se retiró pastoral: PASTORAL JP (1)',
+                      lineas_del_cuaderno(d))
 
     def test_la_abrazadera_para_pastoral_no_es_un_pastoral(self):
         d = Liquidado(recuperos=[item('ABRAZADERA PARA PASTORAL')])
-        self.assertFalse(any('pastoral' in l for l in lineas_del_cuaderno(d)))
+        self.assertFalse(any('Se retiró pastoral' in l
+                             for l in lineas_del_cuaderno(d)))
 
-    def test_caja_y_corona(self):
-        d = Liquidado(
-            recuperos=[item('CAJA DE DERIVACION'), item('ABRAZADERA CORONA')],
-            materiales=[item('CAJA NO METALICA DE DERIVACION'),
-                        item('ABRAZADERA POSTE C.A.150MMD.C/GANCHO ACOMET.DOMIC.', 2)])
+    def test_la_caja_y_la_corona_retiradas(self):
+        d = Liquidado(recuperos=[item('CAJA DE DISTRIBUCION'),
+                                 item('CORONA 4 GANCHOS')])
         lineas = lineas_del_cuaderno(d)
-        self.assertTrue(any(l.startswith('Se realizó retiro e instalación de caja '
-                                         'de distribución') for l in lineas))
-        self.assertTrue(any(l.startswith('Se realizó retiro e instalación de abrazadera '
-                                         'tipo corona con ganchos') for l in lineas))
+        self.assertIn('Se retiró caja de distribución: CAJA DE DISTRIBUCION (1)',
+                      lineas)
+        self.assertIn('Se retiró abrazadera tipo corona con ganchos: '
+                      'CORONA 4 GANCHOS (1)', lineas)
 
-    def test_cables_tramo_por_tramo_y_sin_los_existentes(self):
-        d = Liquidado(elementos_plano=[
-            {'tipo': 'cable', 'estado': 'T', 'descripcion': 'Caais 3x35+1x16', 'metros': 26},
-            {'tipo': 'cable', 'estado': 'T', 'descripcion': 'Caais 3x70', 'metros': 25},
-            {'tipo': 'cable', 'estado': 'T', 'descripcion': 'Caais 3x35+1x16', 'metros': 15},
-            {'tipo': 'cable', 'estado': 'E', 'descripcion': 'Caais 3x16', 'metros': 40},
-        ])
-        lineas = lineas_del_cuaderno(d)
-        self.assertEqual(lineas[1:], [
-            'Traslado Caais 3x35+1x16 26 metros',
-            'Traslado Caais 3x70 25 metros',
-            'Traslado Caais 3x35+1x16 15 metros',
-        ])
+    # ── Suministros trasladados ─────────────────────────────────────────────
 
-    def test_arrastre_con_su_zona(self):
-        d = Liquidado(elementos_plano=[
-            {'tipo': 'cable', 'estado': 'A', 'metros': 12, 'pendiente': True},
-            {'tipo': 'cable', 'estado': 'A', 'metros': 8.5, 'pendiente': False},
-        ])
-        lineas = lineas_del_cuaderno(d)
-        self.assertIn('Arrastre de poste 12 metros en zona de pendiente mayor a 30° '
-                      'o escalera', lineas)
-        self.assertIn('Arrastre de poste 8.5 metros', lineas)
-
-    def test_cables_de_comunicacion_una_sola_vez(self):
-        comunicacion = {'tipo': 'cable', 'estado': 'C', 'metros': 0}
-        lineas = lineas_del_cuaderno(Liquidado(
-            elementos_plano=[comunicacion, dict(comunicacion)]))
-        self.assertEqual(lineas.count('Se trasladó cables de comunicación'), 1)
-
-    def test_sin_cables_de_comunicacion_no_se_escribe(self):
-        lineas = lineas_del_cuaderno(Liquidado(elementos_plano=[
-            {'tipo': 'cable', 'estado': 'T', 'descripcion': 'Caais 3x35',
-             'metros': 10},
-            {'tipo': 'cable', 'estado': 'A', 'metros': 5},
-        ]))
-        self.assertNotIn('Se trasladó cables de comunicación', lineas)
-
-    def test_suministros_trasladados(self):
-        d = Liquidado(partidas=[item('x', 2, '*093081')],
-                      conexiones=['1234567, 7654321'])
-        self.assertIn('Se realizó traslado de 2 suministros: 1234567, 7654321',
+    def test_suministros_trasladados_con_sus_numeros(self):
+        d = Liquidado(partidas=[partida('*093081', 2)],
+                      conexiones=['1234567', '7654321'])
+        self.assertIn('Se realizó traslado de 2 suministros: 1234567; 7654321',
                       lineas_del_cuaderno(d))
+
+    def test_un_solo_suministro_va_en_singular(self):
+        d = Liquidado(partidas=[partida('*093081', 1)])
+        self.assertIn('Se realizó traslado de 1 suministro',
+                      lineas_del_cuaderno(d))
+
+    def test_sin_traslado_de_acometida_no_se_escribe(self):
+        self.assertFalse(any('suministro' in l
+                             for l in lineas_del_cuaderno(Liquidado())))
+
+    # ── El orden de la obra ─────────────────────────────────────────────────
+
+    def test_el_poste_va_antes_que_la_vereda(self):
+        d = Liquidado(materiales=[item('POSTE', codigo='5331616')],
+                      elementos_plano=[vereda(2, 1)])
+        lineas = lineas_del_cuaderno(d)
+        self.assertLess(lineas.index('Se instaló PRFV 9/200'),
+                        lineas.index('Se reparó vereda de 10cm 2 x 1 = 2'))
 
 
 class DescargasTests(BaseAPITestCase):
@@ -209,11 +428,8 @@ class DescargasTests(BaseAPITestCase):
         SuministroRecupero.objects.create(
             suministro=self.poste, recupero=lum, cantidad=1, fecha=date.today())
         lineas = lineas_del_cuaderno(reunir(self.sst))
-        self.assertIn('Se instaló poste POSTE POLIESTER 9 / 200 con código 111222333',
-                      lineas)
-        self.assertIn('Se retiró poste P-7788', lineas)
-        self.assertIn('Arrastre de poste 20 metros', lineas)
-        self.assertIn('Se retiró luminaria: LUMINARIA DE 150 W (1)', lineas)
+        self.assertIn('Se instaló PRFV 9/200 con código 111222333', lineas)
+        self.assertIn('Se realizó arrastre de poste 20 metros en plano', lineas)
 
     # ── Excel ───────────────────────────────────────────────────────────────
 
