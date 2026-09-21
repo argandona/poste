@@ -13,7 +13,8 @@ from openpyxl import load_workbook
 
 from ..cuaderno_obra import Item, Liquidado, lineas_del_cuaderno
 from ..models import (
-    Actividad, ConsumoMaterialSuministro, CuadernoObra, LiquidacionPartida,
+    Actividad, ActividadTipoTrabajo, ConsumoMaterialSuministro, CuadernoObra,
+    LiquidacionPartida,
     LiquidacionSuministro, ManoDeObra, Material, PlanoSST, Recupero, SST,
     Suministro, SSTSuministro, SuministroRecupero, TipoTrabajo,
 )
@@ -491,6 +492,83 @@ class DescargasTests(BaseAPITestCase):
         _llenar_cables(ws, [{'tipo': 'cable', 'estado': 'T', 'descripcion': 'Caais 3x16',
                              'metros': m} for m in (10, 20, 30, 40, 5, 7, 8)])
         self.assertEqual([ws[f'{c}53'].value for c in 'IJKLMN'], [10, 20, 30, 40, 5, 15])
+
+    # ── El Excel cobra lo mismo que el consolidado ──────────────────────────
+
+    def _tipo_poste(self):
+        tipo = TipoTrabajo.objects.get_or_create(nombre='Poste cabria')[0]
+        ActividadTipoTrabajo.objects.get_or_create(
+            actividad=self.actividad, tipo_trabajo=tipo)
+        return tipo
+
+    def liquidar_cambio_de_poste(self, acarreo=None, vereda=None):
+        """Un cambio de poste con lo que el paquete ya incluye."""
+        cambio = ManoDeObra.objects.create(
+            partida='*090470', descripcion='CAMBIO DE POSTE CON VEREDA',
+            precio='100')
+        liq = LiquidacionSuministro.objects.create(
+            suministro=self.poste, sst_externo=self.sst.codigo,
+            usuario=self.capataz, tipo_trabajo=self._tipo_poste())
+        LiquidacionPartida.objects.create(
+            liquidacion=liq, mano_de_obra=cambio, cantidad=1)
+        if acarreo is not None:
+            mo = ManoDeObra.objects.create(
+                partida='*090633', descripcion='ACARREO', precio='2')
+            LiquidacionPartida.objects.create(
+                liquidacion=liq, mano_de_obra=mo, cantidad=acarreo)
+        if vereda is not None:
+            mo = ManoDeObra.objects.create(
+                partida='*091840', descripcion='ROTURA DE VEREDA', precio='24.55')
+            LiquidacionPartida.objects.create(
+                liquidacion=liq, mano_de_obra=mo, cantidad=vereda)
+        return liq
+
+    def mano_de_obra_del_excel(self):
+        r = self.get('/api/liquidaciones/excel/')
+        self.assertEqual(r.status_code, 200)
+        ws = load_workbook(io.BytesIO(r.content))['MANO DE OBRA']
+        filas = {}
+        for fila in range(7, 113):
+            codigo = ws[f'A{fila}'].value
+            if codigo:
+                filas[str(codigo).strip()] = ws[f'F{fila}'].value
+        return filas
+
+    def test_el_excel_descuenta_lo_que_el_paquete_incluye(self):
+        """120 de acarreo con un cambio de poste: 100 van incluidos."""
+        self.liquidar_cambio_de_poste(acarreo=120)
+        self.assertEqual(self.mano_de_obra_del_excel()['*090633'], 20)
+
+    def test_la_vereda_incluida_sale_en_cero(self):
+        """Dos roturas por cambio CON vereda: las dos están incluidas."""
+        self.liquidar_cambio_de_poste(vereda=2)
+        self.assertEqual(self.mano_de_obra_del_excel()['*091840'], 0)
+
+    def test_lo_que_pasa_de_lo_incluido_si_se_cobra(self):
+        self.liquidar_cambio_de_poste(vereda=5)
+        self.assertEqual(self.mano_de_obra_del_excel()['*091840'], 3)
+
+    def test_sin_cambio_de_poste_no_se_descuenta_nada(self):
+        liq = LiquidacionSuministro.objects.create(
+            suministro=self.poste, sst_externo=self.sst.codigo,
+            usuario=self.capataz, tipo_trabajo=self._tipo_poste())
+        mo = ManoDeObra.objects.create(
+            partida='*090633', descripcion='ACARREO', precio='2')
+        LiquidacionPartida.objects.create(
+            liquidacion=liq, mano_de_obra=mo, cantidad=120)
+        self.assertEqual(self.mano_de_obra_del_excel()['*090633'], 120)
+
+    def test_el_excel_dice_lo_mismo_que_el_consolidado(self):
+        self.liquidar_cambio_de_poste(acarreo=120, vereda=5)
+        excel = self.mano_de_obra_del_excel()
+        self.auth(self.capataz)
+        r = self.client.get('/api/liquidaciones/consolidado/')
+        fila = [x for x in r.data if x['sst'] == self.sst.codigo][0]
+        for p in fila['partidas']:
+            if p['partida'] in excel:
+                self.assertEqual(
+                    excel[p['partida']], float(p['cantidad_cobrada']),
+                    f'{p["partida"]} no coincide')
 
     def test_excel_sin_liquidacion(self):
         r = self.get('/api/liquidaciones/excel/')
