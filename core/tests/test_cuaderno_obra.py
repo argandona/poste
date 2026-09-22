@@ -234,6 +234,31 @@ class LineasDelCuadernoTests(BaseAPITestCase):
         self.assertIn('Se realizó arrastre de poste 35 metros en plano',
                       lineas_del_cuaderno(d))
 
+    def test_los_tramos_de_la_misma_zona_se_suman_en_un_renglon(self):
+        """El plano parte el recorrido en pedazos; el cuaderno no."""
+        d = Liquidado(elementos_plano=[
+            cable('A', 20, '', pendiente=True),
+            cable('A', 20, '', pendiente=True),
+            cable('A', 30, '', pendiente=True),
+            cable('A', 25, '', pendiente=True),
+        ])
+        arrastres = [l for l in lineas_del_cuaderno(d) if 'arrastre' in l]
+        self.assertEqual(arrastres, ['Se realizó arrastre de poste 95 metros '
+                                     'en zona de pendiente mayor a 30° o escalera'])
+
+    def test_cada_zona_tiene_su_renglon(self):
+        d = Liquidado(elementos_plano=[
+            cable('A', 20, '', pendiente=True),
+            cable('A', 15, '', pendiente=True),
+            cable('A', 40, '', pendiente=False),
+        ])
+        arrastres = [l for l in lineas_del_cuaderno(d) if 'arrastre' in l]
+        self.assertEqual(arrastres, [
+            'Se realizó arrastre de poste 35 metros en zona de pendiente '
+            'mayor a 30° o escalera',
+            'Se realizó arrastre de poste 40 metros en plano',
+        ])
+
     def test_arrastre_sin_responder_se_toma_como_plano(self):
         d = Liquidado(elementos_plano=[cable('A', 12, '')])
         self.assertIn('Se realizó arrastre de poste 12 metros en plano',
