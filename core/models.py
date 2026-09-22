@@ -222,6 +222,10 @@ class UsuarioCamion(models.Model):
 class Actividad(models.Model):
     id_actividad = models.AutoField(primary_key=True)
     nombre       = models.CharField(max_length=200, unique=True)
+    # Si una SST de esta actividad puede llevar más de un poste. En cambio de
+    # poste una SST es un poste; en una reforma son varios y el capataz los va
+    # agregando en obra. Solo con esto en True aparece el botón de agregar.
+    varios_postes = models.BooleanField(default=False)
     class Meta:
         db_table = "actividad"
     def __str__(self):

@@ -28,9 +28,15 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
-        actividad, nueva = Actividad.objects.get_or_create(nombre=NOMBRE)
+        actividad, nueva = Actividad.objects.get_or_create(
+            nombre=NOMBRE, defaults={'varios_postes': True})
         if nueva:
             self.stdout.write(f"Actividad creada: «{NOMBRE}».")
+        # Es lo que la distingue de la aérea: su SST lleva varios postes.
+        if not actividad.varios_postes:
+            actividad.varios_postes = True
+            actividad.save(update_fields=['varios_postes'])
+            self.stdout.write("  admite varios postes por SST")
 
         # El orden es el de la obra y lo define la aérea: se copia tal cual
         # para que el capataz vea los tipos en la misma secuencia.

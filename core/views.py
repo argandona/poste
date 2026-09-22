@@ -382,6 +382,104 @@ class SSTViewSet(viewsets.ModelViewSet):
         ssts = SST.objects.filter(id_sst__in=sst_ids).select_related('empresa', 'actividad')
         return Response(SSTSerializer(ssts, many=True).data)
 
+    @action(detail=False, methods=['get'])
+    def puntos(self, request):
+        """GET /api/ssts/puntos/?sst_codigo=<codigo> — los postes de una SST.
+
+        Es lo que la pantalla de liquidar usa para pintar el selector de
+        puntos de trabajo. Devuelve todos los de la SST, no solo los del
+        usuario: en una reforma varios capataces pueden estar en la misma."""
+        codigo = (request.query_params.get('sst_codigo') or '').strip()
+        if not codigo:
+            return Response({'detail': 'sst_codigo es obligatorio.'}, status=400)
+        sst = (qs_empresa(SST.objects.select_related('actividad'), request)
+               .filter(models.Q(codigo=codigo) | models.Q(sst=codigo))
+               .first())
+        if sst is None:
+            return Response({'detail': f'No existe la SST {codigo}.'}, status=404)
+        relaciones = (SSTSuministro.objects
+                      .filter(sst=sst)
+                      .select_related('suministro')
+                      .order_by('id_sst_suministro'))
+        return Response({
+            'sst_codigo':    sst.codigo or sst.sst or '',
+            'actividad':     sst.actividad.nombre if sst.actividad_id else '',
+            'varios_postes': bool(sst.actividad_id and sst.actividad.varios_postes),
+            'puntos': [
+                {
+                    'id_suministro':     rel.suministro.id_suministro,
+                    'numero_suministro': rel.suministro.numero_suministro,
+                    'distrito':          rel.suministro.distrito,
+                    'estado':            rel.suministro.estado,
+                    'asignado_a':        rel.asignado_a_id,
+                }
+                for rel in relaciones
+            ],
+        })
+
+    @action(detail=False, methods=['post'])
+    def agregar_punto(self, request):
+        """POST /api/ssts/agregar_punto/  { sst_codigo, numero_suministro }
+
+        Suma un poste a una SST y se lo asigna a quien lo pide. Lo usa el
+        capataz en obra: en una reforma los puntos de trabajo aparecen
+        mientras se trabaja, no vienen en la asignación.
+
+        Solo en actividades que admiten varios postes. En cambio de poste una
+        SST es un poste, y ahí este botón no existe."""
+        codigo = (request.data.get('sst_codigo') or '').strip()
+        numero = (request.data.get('numero_suministro') or '').strip()
+        if not codigo or not numero:
+            return Response(
+                {'detail': 'sst_codigo y numero_suministro son obligatorios.'},
+                status=400)
+
+        sst = (qs_empresa(SST.objects.select_related('actividad'), request)
+               .filter(models.Q(codigo=codigo) | models.Q(sst=codigo))
+               .first())
+        if sst is None:
+            return Response({'detail': f'No existe la SST {codigo}.'}, status=404)
+        if not (sst.actividad_id and sst.actividad.varios_postes):
+            nombre = sst.actividad.nombre if sst.actividad_id else 'sin actividad'
+            return Response(
+                {'detail': f'La actividad «{nombre}» liquida un solo poste por '
+                           'SST: no se pueden agregar más.'}, status=400)
+
+        actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
+        if actor is None:
+            return Response({'detail': 'Usuario no encontrado.'}, status=400)
+
+        suministro = Suministro.objects.filter(numero_suministro=numero).first()
+        if suministro is not None:
+            rel = (SSTSuministro.objects
+                   .select_related('sst')
+                   .filter(suministro=suministro).first())
+            if rel is not None:
+                if rel.sst_id == sst.id_sst:
+                    return Response(
+                        {'detail': f'El poste {numero} ya está en esta SST.'},
+                        status=400)
+                otra = rel.sst.codigo or rel.sst.sst
+                return Response(
+                    {'detail': f'El poste {numero} ya pertenece a la SST {otra}.'},
+                    status=400)
+        else:
+            # Un poste suelto se reaprovecha; si no existe, nace aquí.
+            suministro = Suministro.objects.create(
+                numero_suministro=numero,
+                distrito=sst.distrito or '',
+                estado='asignado')
+
+        SSTSuministro.objects.create(
+            sst=sst, suministro=suministro, asignado_a=actor)
+        return Response({
+            'id_suministro':     suministro.id_suministro,
+            'numero_suministro': suministro.numero_suministro,
+            'sst_codigo':        sst.codigo or sst.sst or '',
+            'distrito':          suministro.distrito,
+            'actividad':         sst.actividad.nombre,
+        }, status=201)
+
     @action(detail=True, methods=['get'])
     def suministros(self, request, pk=None):
         """GET /api/ssts/<id>/suministros/ — suministros (postes) de este SST."""
