@@ -41,6 +41,13 @@ def vereda(largo, ancho):
     return {'tipo': 'vereda', 'largo': largo, 'ancho': ancho}
 
 
+def poste_liquidado(numero, materiales=(), partidas=(), recuperos=(), tipos=()):
+    """Un poste de la SST con lo suyo. El plano no va aquí: es de la SST."""
+    return Liquidado(
+        materiales=list(materiales), partidas=list(partidas),
+        recuperos=list(recuperos), postes=[numero], tipos=list(tipos))
+
+
 class LineasDelCuadernoTests(BaseAPITestCase):
     """El cuerpo del cuaderno: cada renglón cuando corresponde, y no cuando no.
 
@@ -361,6 +368,89 @@ class LineasDelCuadernoTests(BaseAPITestCase):
     def test_sin_traslado_de_acometida_no_se_escribe(self):
         self.assertFalse(any('suministro' in l
                              for l in lineas_del_cuaderno(Liquidado())))
+
+    # ── Una SST con varios postes ───────────────────────────────────────────
+
+    def test_con_un_solo_poste_el_cuaderno_no_cambia(self):
+        """Lo que ya funcionaba tiene que salir idéntico."""
+        d = Liquidado(
+            materiales=[item('POSTE', codigo='5331616')],
+            postes=['771000100'],
+            por_poste=[poste_liquidado('771000100',
+                             materiales=[item('POSTE', codigo='5331616')])])
+        lineas = lineas_del_cuaderno(d)
+        self.assertIn('Se instaló PRFV 9/200', lineas)
+        self.assertFalse(any(l.startswith('Poste 771000100:') for l in lineas))
+
+    def test_con_varios_postes_cada_uno_lleva_su_encabezado(self):
+        d = Liquidado(
+            materiales=[item('POSTE', codigo='5331616', cantidad=2)],
+            partidas=[partida('*091320', 2)],
+            por_poste=[
+                poste_liquidado('771000100',
+                      materiales=[item('POSTE', codigo='5331616')],
+                      partidas=[partida('*091320')]),
+                poste_liquidado('771000101',
+                      materiales=[item('POSTE', codigo='5331596')],
+                      partidas=[partida('*091320')]),
+            ])
+        lineas = lineas_del_cuaderno(d)
+        self.assertIn('Poste 771000100:', lineas)
+        self.assertIn('Poste 771000101:', lineas)
+        # Cada uno con el suyo: el de 9 metros y el de 7,5.
+        self.assertIn('Se instaló PRFV 9/200', lineas)
+        self.assertIn('Se instaló PRFV 7/150', lineas)
+
+    def test_cada_poste_dice_lo_suyo_y_en_su_bloque(self):
+        d = Liquidado(
+            por_poste=[
+                poste_liquidado('771000100', partidas=[partida('*098670')]),
+                poste_liquidado('771000101', partidas=[partida('*090060', 2)]),
+            ])
+        lineas = lineas_del_cuaderno(d)
+        primero = lineas.index('Poste 771000100:')
+        segundo = lineas.index('Poste 771000101:')
+        mensula = lineas.index('Se instaló ménsula doble de madera')
+        diagonal = lineas.index('Se instaló diagonal de acero (2)')
+        self.assertTrue(primero < mensula < segundo < diagonal)
+
+    def test_lo_del_plano_va_una_sola_vez_al_final(self):
+        """El plano es de la SST: si se repitiera por poste, se cobraría dos
+        veces y el cuaderno lo diría dos veces."""
+        d = Liquidado(
+            partidas=[partida('*090633', 100), partida('*090630', 40)],
+            elementos_plano=[cable('A', 40, '', pendiente=False),
+                             vereda(2, 1.5)],
+            por_poste=[
+                poste_liquidado('771000100', partidas=[partida('*098670')]),
+                poste_liquidado('771000101', partidas=[partida('*090060')]),
+            ])
+        lineas = lineas_del_cuaderno(d)
+        arrastres = [l for l in lineas if 'arrastre' in l]
+        veredas = [l for l in lineas if 'vereda' in l]
+        self.assertEqual(len(arrastres), 1)
+        self.assertEqual(len(veredas), 1)
+        # Y después del detalle de los postes.
+        self.assertGreater(lineas.index(arrastres[0]),
+                           lineas.index('Poste 771000101:'))
+
+    def test_un_poste_sin_nada_no_ensucia_el_cuaderno(self):
+        d = Liquidado(por_poste=[
+            poste_liquidado('771000100', partidas=[partida('*098670')]),
+            poste_liquidado('771000101'),
+        ])
+        lineas = lineas_del_cuaderno(d)
+        self.assertIn('Poste 771000100:', lineas)
+        self.assertNotIn('Poste 771000101:', lineas)
+
+    def test_el_retiro_del_poste_va_en_su_bloque(self):
+        d = Liquidado(por_poste=[
+            poste_liquidado('771000100', materiales=[item('POSTE', codigo='5331616')]),
+            poste_liquidado('771000101', materiales=[item('POSTE', codigo='5331596')]),
+        ])
+        lineas = lineas_del_cuaderno(d)
+        self.assertIn('Se retiró poste 771000100', lineas)
+        self.assertIn('Se retiró poste 771000101', lineas)
 
     # ── El orden de la obra ─────────────────────────────────────────────────
 
