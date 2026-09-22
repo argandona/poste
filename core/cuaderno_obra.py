@@ -121,6 +121,9 @@ class Liquidado:
     postes: list = field(default_factory=list)       # números asignados
     tipos: list = field(default_factory=list)        # tipos de trabajo marcados
     conexiones: list = field(default_factory=list)   # comentarios escritos
+    # Lo de cada poste por separado, para el cuaderno de una SST con varios.
+    # Cada uno es otro Liquidado, con lo suyo y sin el plano, que es de la SST.
+    por_poste: list = field(default_factory=list)
     capataz: str = ''
     actividad: str = ''
 
@@ -160,32 +163,65 @@ def reunir(sst):
                           'materiales_consumidos__material')
         .order_by('id_liquidacion'))
 
+    # Todo junto para la SST, y además lo de cada poste por separado: una
+    # reforma lleva varios y el cuaderno los detalla uno por uno.
     materiales, partidas = {}, {}
     tipos, conexiones = [], []
+    de_cada_poste = {}
     for liq in liquidaciones:
+        clave = liq.suministro_id or liq.suministro_externo or ''
+        suyo = de_cada_poste.setdefault(clave, {
+            'numero': (liq.suministro.numero_suministro if liq.suministro_id
+                       else liq.suministro_externo or ''),
+            'materiales': {}, 'partidas': {}, 'tipos': [], 'conexiones': [],
+        })
         for c in liq.materiales_consumidos.all():
             m = c.material
-            item = materiales.setdefault(
-                m.matricula, Item(m.matricula, m.descripcion, Decimal('0'), m.precio))
-            item.cantidad += c.cantidad
+            for donde in (materiales, suyo['materiales']):
+                item = donde.setdefault(
+                    m.matricula,
+                    Item(m.matricula, m.descripcion, Decimal('0'), m.precio))
+                item.cantidad += c.cantidad
         for p in liq.partidas.all():
             mo = p.mano_de_obra
-            item = partidas.setdefault(
-                mo.partida, Item(mo.partida, mo.descripcion, Decimal('0'), mo.precio))
-            item.cantidad += p.cantidad
+            for donde in (partidas, suyo['partidas']):
+                item = donde.setdefault(
+                    mo.partida,
+                    Item(mo.partida, mo.descripcion, Decimal('0'), mo.precio))
+                item.cantidad += p.cantidad
         if liq.tipo_trabajo.nombre not in tipos:
             tipos.append(liq.tipo_trabajo.nombre)
+        if liq.tipo_trabajo.nombre not in suyo['tipos']:
+            suyo['tipos'].append(liq.tipo_trabajo.nombre)
         if liq.comentario.strip() and 'conexion' in normalizar(liq.tipo_trabajo.nombre):
             conexiones.append(liq.comentario.strip())
+            suyo['conexiones'].append(liq.comentario.strip())
 
     recuperos = {}
+    recuperos_de = {}
     for r in (SuministroRecupero.objects
               .filter(suministro__in=suministros)
-              .select_related('recupero')):
-        item = recuperos.setdefault(
-            r.recupero_id,
-            Item(r.recupero.matricula, r.recupero.descripcion, Decimal('0')))
-        item.cantidad += r.cantidad
+              .select_related('recupero', 'suministro')):
+        for donde in (recuperos,
+                      recuperos_de.setdefault(r.suministro_id, {})):
+            item = donde.setdefault(
+                r.recupero_id,
+                Item(r.recupero.matricula, r.recupero.descripcion, Decimal('0')))
+            item.cantidad += r.cantidad
+
+    # Cada poste como un Liquidado propio: así el cuaderno le aplica las
+    # mismas reglas que a una SST de un solo poste, sin repetirlas.
+    por_poste = []
+    for clave, suyo in de_cada_poste.items():
+        por_poste.append(Liquidado(
+            materiales=[i for i in suyo['materiales'].values() if i.cantidad > 0],
+            partidas=[i for i in suyo['partidas'].values() if i.cantidad > 0],
+            recuperos=[i for i in recuperos_de.get(clave, {}).values()
+                       if i.cantidad > 0],
+            postes=[suyo['numero']] if suyo['numero'] else [],
+            tipos=suyo['tipos'],
+            conexiones=suyo['conexiones'],
+        ))
 
     plano = (PlanoSST.objects.filter(empresa_id=sst.empresa_id, sst_codigo=codigo)
              .first() if codigo else None)
@@ -198,6 +234,7 @@ def reunir(sst):
         postes=[s.numero_suministro for s in suministros],
         tipos=tipos,
         conexiones=conexiones,
+        por_poste=por_poste,
         capataz=ultima.usuario.nombre if ultima else '',
         actividad=sst.actividad.nombre if sst.actividad_id else '',
     )
@@ -213,6 +250,34 @@ def lineas_del_cuaderno(d):
     inventa nada ni se pregunta nada."""
     lineas = ['Por la presente se informa que la SST se ejecutó según lo detallado:']
 
+    if len(d.por_poste) > 1:
+        # Una reforma: la SST lleva varios postes y cada uno se detalla con su
+        # número delante. Lo mismo de siempre, agrupado.
+        for poste in d.por_poste:
+            suyas = []
+            _lo_de_cada_poste(poste, suyas)
+            if not suyas:
+                continue
+            numero = poste.postes[0] if poste.postes else ''
+            lineas.append(f'Poste {numero}:' if numero else 'Poste:')
+            lineas.extend(suyas)
+    else:
+        _lo_de_cada_poste(d, lineas)
+
+    # Lo que sale del plano es de toda la SST, así que va una sola vez y al
+    # final, después del detalle de los postes.
+    _cables(d, lineas)
+    _arrastre(d, lineas)
+    _acarreo(d, lineas)
+    _veredas(d, lineas)
+    _suministros_trasladados(d, lineas)
+
+    return lineas
+
+
+def _lo_de_cada_poste(d, lineas):
+    """Lo que se hizo en un poste: lo que se le puso, lo que se le quitó y lo
+    que se trasladó. Nada de esto sale del plano."""
     _poste(d, lineas)
     _postes_retirados(d, lineas)
     _alumbrado_instalado(d, lineas)
@@ -221,13 +286,6 @@ def lineas_del_cuaderno(d):
     _ferreteria(d, lineas)
     _retenidas(d, lineas)
     _retirados(d, lineas)
-    _cables(d, lineas)
-    _arrastre(d, lineas)
-    _acarreo(d, lineas)
-    _veredas(d, lineas)
-    _suministros_trasladados(d, lineas)
-
-    return lineas
 
 
 def _poste(d, lineas):
