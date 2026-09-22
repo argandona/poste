@@ -364,14 +364,28 @@ def _cables(d, lineas):
         lineas.append('Se trasladó cables de comunicación')
 
 
+# Las dos zonas del arrastre. Van en renglones distintos porque se cobran en
+# partidas distintas: *090632 en pendiente y *090630 en plano.
+ZONAS_DE_ARRASTRE = (
+    (True, 'en zona de pendiente mayor a 30° o escalera'),
+    (False, 'en plano'),
+)
+
+
 def _arrastre(d, lineas):
-    for e in d.plano('cable'):
-        if e.get('estado') != 'A':
-            continue
-        zona = ('en zona de pendiente mayor a 30° o escalera'
-                if e.get('pendiente') is True else 'en plano')
-        lineas.append('Se realizó arrastre de poste '
-                      f'{numero(e.get("metros"))} metros {zona}')
+    """Todo el arrastre del poste, en un renglón por zona.
+
+    El plano trae el recorrido partido en tramos —se dibuja pedazo a pedazo
+    para que siga la calle—, pero en el cuaderno interesa cuánto se arrastró,
+    no en cuántos pedazos."""
+    tramos = [e for e in d.plano('cable') if e.get('estado') == 'A']
+    for pendiente, zona in ZONAS_DE_ARRASTRE:
+        metros = sum((Decimal(str(e.get('metros') or 0)) for e in tramos
+                      if (e.get('pendiente') is True) == pendiente),
+                     Decimal('0'))
+        if metros > 0:
+            lineas.append(f'Se realizó arrastre de poste {numero(metros)} '
+                          f'metros {zona}')
 
 
 def _acarreo(d, lineas):
