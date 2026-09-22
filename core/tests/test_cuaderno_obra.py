@@ -680,6 +680,30 @@ class DescargasTests(BaseAPITestCase):
             self.get('/api/liquidaciones/excel/').content))
         self.assertEqual(self.fila(wb['Traslado - Acarreo'], 4), [None] * 9)
 
+    def test_el_cable_instalado_va_en_la_fila_de_instalacion(self):
+        """La plantilla rotula la fila 52 como instalación y la 53 traslado."""
+        self.liquidar()
+        PlanoSST.objects.create(
+            empresa=self.empresa, sst_codigo=self.sst.codigo,
+            usuario=self.capataz,
+            elementos=[
+                {'tipo': 'cable', 'estado': 'I', 'descripcion': 'Caais 3x16',
+                 'metros': 40},
+                {'tipo': 'cable', 'estado': 'I', 'descripcion': 'Caais 2x16',
+                 'metros': 15},
+                {'tipo': 'cable', 'estado': 'T',
+                 'descripcion': 'Caais 3x35+1x16', 'metros': 26},
+                {'tipo': 'cable', 'estado': 'I', 'descripcion': 'Caais 3x70',
+                 'metros': 90},
+            ])
+        wb = load_workbook(io.BytesIO(
+            self.get('/api/liquidaciones/excel/').content))
+        cab = wb['Cables']
+        self.assertEqual([cab[f'{c}52'].value for c in 'IJKLMN'],
+                         [40, 15, 0, 0, 0, 0])
+        # El grueso no es de hasta 35: no entra en esta fila.
+        self.assertEqual([cab[f'{c}53'].value for c in 'IJ'], [26, None])
+
     # ── El Excel cobra lo mismo que el consolidado ──────────────────────────
 
     def _tipo_poste(self):

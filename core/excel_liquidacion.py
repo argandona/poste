@@ -7,8 +7,9 @@ formatos y las demás hojas quedan como vienen.
 - Carátula: SST, cliente, actividad, distrito, fechas, contratista y capataz.
 - MATERIAL: la cantidad va en la columna AV.
 - MANO DE OBRA: la cantidad va en P1 (columna F), que suma la columna Cant.
-- Cables: los metros de cable de hasta 35 mm2 trasladado, un tramo del plano
-  por vano, desde I53 hacia la derecha.
+- Cables: los metros de cable de hasta 35 mm2, un tramo del plano por vano y
+  desde la columna I hacia la derecha. Lo instalado va en la fila 52 y lo
+  trasladado en la 53, como las rotula la plantilla.
 - Vereda: largo y ancho de cada paño del plano, desde C5 y D5 hacia abajo.
 - Traslado - Acarreo: los tramos de arrastre del poste, uno por columna, en la
   fila 4 (lo ejecutado) y en la fila 5 (lo que se cobra, con el descuento de
@@ -30,7 +31,9 @@ MAT_CANTIDAD = 'AV'
 # Hoja MANO DE OBRA
 MO_PRIMERA, MO_ULTIMA = 7, 112
 MO_CANTIDAD = 'F'
-# Hoja Cables: fila de traslado y sus seis vanos (O53 los suma).
+# Hoja Cables: la plantilla rotula la fila 52 como instalación y la 53 como
+# traslado, cada una con seis vanos que suma su columna O.
+CABLES_INSTALADO = 52
 CABLES_FILA = 53
 CABLES_VANOS = ['I', 'J', 'K', 'L', 'M', 'N']
 # Los calibres de hasta 35 mm2, como aparecen en la descripción del plano:
@@ -149,22 +152,34 @@ def _llenar_mano_de_obra(ws, partidas):
         ws[f'{MO_CANTIDAD}{fila}'] = float(p.cantidad)
 
 
-def tramos_hasta_35(elementos_plano):
-    """Metros de cada tramo de cable de hasta 35 mm2 trasladado, en el orden
-    en que se dibujaron."""
+def tramos_hasta_35(elementos_plano, estado='T'):
+    """Metros de cada tramo de cable de hasta 35 mm2, en el orden en que se
+    dibujaron. Por defecto los trasladados; con estado='I', los instalados."""
     return [float(e.get('metros') or 0) for e in elementos_plano
-            if e.get('tipo') == 'cable' and e.get('estado') == 'T'
+            if e.get('tipo') == 'cable' and e.get('estado') == estado
             and any(c in (e.get('descripcion') or '').lower() for c in CABLES_HASTA_35)]
 
 
 def _llenar_cables(ws, elementos_plano):
-    tramos = tramos_hasta_35(elementos_plano)
-    # La plantilla trae seis vanos. Si hay más tramos, el último vano se
-    # lleva el resto, para que el total de la fila siga siendo el del plano.
+    _vanos(ws, CABLES_FILA, tramos_hasta_35(elementos_plano))
+    _vanos(ws, CABLES_INSTALADO,
+           tramos_hasta_35(elementos_plano, estado='I'))
+
+
+def _vanos(ws, fila, tramos):
+    """Un tramo por vano. La plantilla trae seis: si hay más tramos, el último
+    vano se lleva el resto, para que el total de la fila siga siendo el del
+    plano. Se suma aparte y se escribe al final, porque la plantilla ya trae
+    ceros en esas celdas."""
+    if not tramos:
+        return
     ultimo = len(CABLES_VANOS) - 1
+    por_vano = {}
     for i, metros in enumerate(tramos):
-        celda = f'{CABLES_VANOS[min(i, ultimo)]}{CABLES_FILA}'
-        ws[celda] = (ws[celda].value or 0) + metros if i > ultimo else metros
+        columna = CABLES_VANOS[min(i, ultimo)]
+        por_vano[columna] = por_vano.get(columna, 0) + metros
+    for columna, metros in por_vano.items():
+        ws[f'{columna}{fila}'] = metros
 
 
 def tramos_de_arrastre(elementos_plano):

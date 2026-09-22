@@ -92,6 +92,7 @@ CATALOGO = {
             "*010101": 0,  # hora de operario: se carga según lo trabajado
             "*010213": 0,  # traslado de cables de comunicación
             # Retiros: la app los llena con lo cargado en Recupero.
+            "*090137": 0,  # retiro cable 50-120 mm2     <- CAAIS 3x70(+1x16)
             "*090139": 0,  # retiro cable 10-25 mm2      <- CAAIS 3x16(+1x16)
             "*090138": 0,  # retiro cable 25-50 mm2      <- CAAIS 3x35+1x16
             "*091411": 0,  # retiro cable NYY            <- NYY 2-1x6
