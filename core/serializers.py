@@ -524,7 +524,9 @@ class TipoTrabajoMaterialSerializer(serializers.ModelSerializer):
 class ActividadSerializer(serializers.ModelSerializer):
     class Meta:
         model  = Actividad
-        fields = ['id_actividad', 'nombre']
+        # `varios_postes` lo necesita la app: con él decide si muestra el
+        # botón de agregar un punto de trabajo a la SST.
+        fields = ['id_actividad', 'nombre', 'varios_postes']
 
 
 class TipoTrabajoSerializer(serializers.ModelSerializer):
