@@ -17,3 +17,5 @@ python manage.py configurar_cabria
 # Cabria subterráneo comparte dos tipos de trabajo con la aérea, así que va
 # después: los tipos los crea el comando de arriba.
 python manage.py configurar_cabria_subterraneo
+# La reforma hereda los tipos de trabajo de la aérea, así que va después.
+python manage.py configurar_reforma_cabria

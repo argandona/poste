@@ -94,6 +94,11 @@ INCLUSIONES_CONSOLIDADO = {
 INCLUSIONES_CONSOLIDADO['cambio de poste inacc. cabria subterraneo'] = \
     INCLUSIONES_CONSOLIDADO['cambio de poste inaccesible subterraneo']
 
+# La reforma es el mismo trabajo que cabria aérea, con varios postes por SST:
+# sus descuentos son los de allá, el mismo bloque.
+INCLUSIONES_CONSOLIDADO['reforma - cambio de poste inacc. aereo - cabria'] = \
+    INCLUSIONES_CONSOLIDADO['cambio de poste inacc. cabria aereo']
+
 
 def consolidar_partidas(postes, reglas, buscar_partida):
     """Las partidas de una SST con lo real, lo incluido y lo que se cobra.
