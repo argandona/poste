@@ -99,6 +99,30 @@ class ConsolidadoCabriaTests(BaseAPITestCase):
         self.assertEqual(
             self.consolidado()["*090310"]["cantidad_cobrada"], "1.00")
 
+    def test_el_cambio_de_poste_incluye_diez_metros_de_retiro_de_cable(self):
+        poste = self._tipo('Poste cabria')
+        cambio = ManoDeObra.objects.create(
+            partida='*090470', descripcion='CAMBIO DE POSTE CON VEREDA',
+            precio='100')
+        retiro = ManoDeObra.objects.create(
+            partida='*091411', descripcion='RETIRO CABLE NYY', precio='2.13')
+        self.liquidar(poste, {cambio: 1, retiro: 8})
+        # Por número: un cero exacto puede venir como "0" o como "0.00" según
+        # de qué resta salga.
+        self.assertEqual(
+            float(self.consolidado()['*091411']['cantidad_cobrada']), 0.0)
+
+    def test_en_la_aerea_tambien_se_cobra_lo_que_pasa_de_diez(self):
+        poste = self._tipo('Poste cabria')
+        cambio = ManoDeObra.objects.create(
+            partida='*090471', descripcion='CAMBIO DE POSTE SIN VEREDA',
+            precio='100')
+        retiro = ManoDeObra.objects.create(
+            partida='*091411', descripcion='RETIRO CABLE NYY', precio='2.13')
+        self.liquidar(poste, {cambio: 1, retiro: 30})
+        self.assertEqual(self.consolidado()['*091411']['cantidad_cobrada'],
+                         '20.00')
+
     def test_en_cabria_no_se_cuentan_cambios_de_poste(self):
         self.liquidar(self.retenida, {self.p_violin: 2})
         self.auth(self.capataz)

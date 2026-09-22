@@ -41,6 +41,10 @@ INCLUSIONES_CONSOLIDADO = {
             # descuento está por si alguna vez se liquidan.
             '*091240': 1,     # subida a poste
             '*090238': 1,     # escalamiento con escalera
+            # El cable que baja del poste: el cambio ya incluye retirar hasta
+            # 10 metros, que es lo que mide la subida que después vuelve a
+            # ponerse. Va por metro, no por unidad.
+            '*091411': 10,    # retiro de cable NYY hasta 3-1x16
         },
         # Desde el 2026-09-20 el alumbrado de esta actividad es el mismo tipo
         # de trabajo que el de cabria aérea, así que trae también el conector
@@ -66,6 +70,7 @@ INCLUSIONES_CONSOLIDADO = {
             '*091840': 2,     # rotura de vereda
             '*091240': 1,     # subida a poste
             '*090238': 1,     # escalamiento: cambiar el poste ya lo incluye
+            '*091411': 10,    # retiro de cable NYY: 10 metros por cambio
             # Cada retenida, sea violín anclada o templador aéreo, ya trae
             # incluido su perno de anclaje: no se cobra dos veces si además
             # se liquidó en ferretería.

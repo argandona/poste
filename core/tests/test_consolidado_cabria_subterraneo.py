@@ -39,6 +39,8 @@ class ConsolidadoCabriaSubterraneoTests(BaseAPITestCase):
         self.p_luminaria = self._partida("*091320", "LUMINARIA COMPLETA")
         self.p_retiro_lum = self._partida("*091316", "RETIRO DE LUMINARIA")
         self.p_acarreo = self._partida("*090633", "ACARREO PARA CIMENTACION")
+        self.p_retiro_cable = self._partida(
+            "*091411", "RETIRO CABLE NYY BT HASTA 3-1x16mm2")
         self.p_subida = self._partida(
             "*091240", "SUBIDA A POSTE C/EMPALME P/AP")
         self.p_escalamiento = self._partida(
@@ -157,6 +159,34 @@ class ConsolidadoCabriaSubterraneoTests(BaseAPITestCase):
         self.liquidar(self.t_poste, {self.p_escalamiento: 1})
         self.assertEqual(
             self.consolidado()["*090238"]["cantidad_cobrada"], "0.00")
+
+    # ── El cable que baja con el poste ──────────────────────────────────────
+
+    def test_el_cambio_incluye_diez_metros_de_retiro_de_cable(self):
+        """Va por metro, no por unidad: son los 10 metros de la subida."""
+        self.cambio_de_poste()
+        self.liquidar(self.t_poste, {self.p_retiro_cable: 8})
+        # Por número: un cero exacto puede venir como "0" o como "0.00" según
+        # de qué resta salga.
+        self.assertEqual(
+            float(self.consolidado()["*091411"]["cantidad_cobrada"]), 0.0)
+
+    def test_lo_que_pasa_de_diez_metros_se_cobra(self):
+        self.cambio_de_poste()
+        self.liquidar(self.t_poste, {self.p_retiro_cable: 25})
+        self.assertEqual(
+            self.consolidado()["*091411"]["cantidad_cobrada"], "15.00")
+
+    def test_dos_cambios_de_poste_incluyen_veinte_metros(self):
+        self.cambio_de_poste(2)
+        self.liquidar(self.t_poste, {self.p_retiro_cable: 25})
+        self.assertEqual(
+            self.consolidado()["*091411"]["cantidad_cobrada"], "5.00")
+
+    def test_sin_cambio_de_poste_el_retiro_se_cobra_entero(self):
+        self.liquidar(self.t_poste, {self.p_retiro_cable: 8})
+        self.assertEqual(
+            self.consolidado()["*091411"]["cantidad_cobrada"], "8.00")
 
     # ── Lo que no cambió ────────────────────────────────────────────────────
 
