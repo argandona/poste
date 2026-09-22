@@ -19,3 +19,5 @@ python manage.py configurar_cabria
 python manage.py configurar_cabria_subterraneo
 # La reforma hereda los tipos de trabajo de la aérea, así que va después.
 python manage.py configurar_reforma_cabria
+# Qué se cobra una vez por SST: lo que sale del plano.
+python manage.py configurar_partidas_de_sst

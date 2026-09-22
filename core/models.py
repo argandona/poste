@@ -293,10 +293,20 @@ class SSTSuministro(models.Model):
 
 
 class ManoDeObra(models.Model):
+    AMBITO_POSTE = "poste"
+    AMBITO_SST   = "sst"
+    AMBITO_CHOICES = [(AMBITO_POSTE, "Por poste"), (AMBITO_SST, "Por SST")]
+
     id_mano_de_obra = models.AutoField(primary_key=True)
     partida         = models.CharField(max_length=7, unique=True)
     descripcion     = models.CharField(max_length=200)
     precio          = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0)])
+    # Qué se cobra una vez por SST y qué por cada poste. Las que salen del
+    # plano -vereda, arrastre, acarreo, cables- son de la SST: el plano es uno
+    # solo, así que cargarlas en cada poste las cobraría dos veces. En las
+    # actividades de un poste por SST esto no cambia nada.
+    ambito          = models.CharField(max_length=10, choices=AMBITO_CHOICES,
+                                       default=AMBITO_POSTE)
     class Meta:
         db_table = "mano_de_obra"
     def __str__(self):

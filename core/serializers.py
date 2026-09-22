@@ -1,4 +1,7 @@
+from django.db import models
 from rest_framework import serializers
+
+from .errores import ErrorNegocio
 from .models import (
     Empresa, Rol, Usuario, Camion, UsuarioCamion, SST,
     TraspasoCamion, DetalleTraspasoCamion,
@@ -504,11 +507,14 @@ class TipoTrabajoPartidaSerializer(serializers.ModelSerializer):
     partida         = serializers.CharField(source='mano_de_obra.partida',            read_only=True)
     descripcion     = serializers.CharField(source='mano_de_obra.descripcion',        read_only=True)
     precio          = serializers.DecimalField(source='mano_de_obra.precio', max_digits=12, decimal_places=2, read_only=True)
+    # 'sst' = se cobra una vez por SST, no por poste. La app la bloquea en los
+    # demás postes de esa SST.
+    ambito          = serializers.CharField(source='mano_de_obra.ambito',       read_only=True)
 
     class Meta:
         model  = TipoTrabajoManoDeObra
         fields = ['id_mano_de_obra', 'partida', 'descripcion', 'precio',
-                  'cantidad_inicial']
+                  'cantidad_inicial', 'ambito']
 
 
 class TipoTrabajoMaterialSerializer(serializers.ModelSerializer):
@@ -714,6 +720,47 @@ class CorreccionLiquidacionSerializer(serializers.ModelSerializer):
         ]
 
 
+def partidas_de_sst_ocupadas(sst_codigo, suministro=None, suministro_externo=''):
+    """Las partidas de ámbito SST ya liquidadas en OTRO poste de esa SST.
+
+    Devuelve {codigo de partida: número del poste que la tiene}. Es lo que
+    impide cobrar dos veces lo que sale del plano: el plano es de la SST, así
+    que su vereda, su arrastre y sus cables se liquidan una sola vez.
+
+    El poste que se está liquidando se excluye: volver a grabarlo es
+    corregirlo, no duplicarlo."""
+    from .models import LiquidacionSuministro, ManoDeObra, SSTSuministro
+
+    if not sst_codigo:
+        return {}
+    postes = list(SSTSuministro.objects
+                  .filter(models.Q(sst__codigo=sst_codigo) |
+                          models.Q(sst__sst=sst_codigo))
+                  .values_list('suministro_id', flat=True))
+    filtro = models.Q(sst_externo=sst_codigo)
+    if postes:
+        filtro |= models.Q(suministro_id__in=postes)
+    liquidaciones = (LiquidacionSuministro.objects
+                     .filter(filtro)
+                     .select_related('suministro')
+                     .prefetch_related('partidas__mano_de_obra'))
+    if suministro is not None:
+        liquidaciones = liquidaciones.exclude(suministro=suministro)
+    if suministro_externo:
+        liquidaciones = liquidaciones.exclude(
+            suministro_externo=suministro_externo)
+
+    ocupadas = {}
+    for liq in liquidaciones:
+        quien = (liq.suministro.numero_suministro if liq.suministro_id
+                 else liq.suministro_externo or '?')
+        for lp in liq.partidas.all():
+            mo = lp.mano_de_obra
+            if mo.ambito == ManoDeObra.AMBITO_SST and lp.cantidad > 0:
+                ocupadas.setdefault(mo.partida, quien)
+    return ocupadas
+
+
 class LiquidacionSuministroCreateSerializer(serializers.Serializer):
     # Suministro local (opcional si se usa suministro externo)
     suministro          = serializers.PrimaryKeyRelatedField(queryset=Suministro.objects.all(), required=False, allow_null=True)
@@ -814,6 +861,18 @@ class LiquidacionSuministroCreateSerializer(serializers.Serializer):
                                    sst_externo=sst_externo)
             else:
                 prev = prev.none()
+            # Lo que sale del plano se cobra una vez por SST. Si otro poste
+            # ya lo liquidó, aquí se corta antes de tocar stock.
+            ocupadas = partidas_de_sst_ocupadas(
+                sst_externo, suministro_local, suministro_externo)
+            for p in partidas_data:
+                mo = p['mano_de_obra']
+                if (mo.ambito == ManoDeObra.AMBITO_SST and p['cantidad'] > 0
+                        and mo.partida in ocupadas):
+                    raise ErrorNegocio(
+                        f'{mo.partida} se cobra una vez por SST y ya se '
+                        f'liquidó en el poste {ocupadas[mo.partida]}.')
+
             # Antes de borrarla hay que retratarla: al salir de aquí, esa copia
             # es lo único que queda de lo que decía y de quién la liquidó.
             previas = list(prev.select_related('usuario')

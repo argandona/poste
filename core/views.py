@@ -28,19 +28,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
-
-class ErrorNegocio(APIException):
-    """Error de regla de negocio dentro de un bloque transaccional.
-
-    Devolver un `Response` desde dentro de un `transaction.atomic()` sale del
-    bloque sin excepción, así que la transacción COMMITEA lo hecho hasta ahí:
-    un pedido de varios materiales podía descontar los primeros y responder 400
-    por el último. Lanzar esta excepción aborta la transacción y responde 400
-    con la misma forma que antes (`{"detail": "<texto>"}`), que es lo que espera
-    la app Flutter en api_service.dart.
-    """
-    status_code = status.HTTP_400_BAD_REQUEST
-    default_detail = 'Operación inválida.'
+from .errores import ErrorNegocio
 
 
 class CatalogoPagination(PageNumberPagination):
@@ -1733,6 +1721,27 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         liq = serializer.save()
         return Response(LiquidacionSuministroSerializer(liq).data, status=201)
+
+    @action(detail=False, methods=['get'])
+    def partidas_de_sst(self, request):
+        """GET /api/liquidaciones/partidas_de_sst/?sst=<codigo>
+
+        Las partidas que se cobran una vez por SST y que algún poste de esa
+        SST ya liquidó, con el número del poste que las tiene. La app las
+        muestra bloqueadas en los demás puntos de trabajo, para que el capataz
+        vea que ya están cobradas y por quién."""
+        from .serializers import partidas_de_sst_ocupadas
+
+        codigo = (request.query_params.get('sst') or '').strip()
+        if not codigo:
+            return Response({'detail': 'Se requiere el código de la SST.'},
+                            status=400)
+        suministro = None
+        id_suministro = request.query_params.get('suministro')
+        if id_suministro:
+            suministro = Suministro.objects.filter(pk=id_suministro).first()
+        externo = (request.query_params.get('suministro_externo') or '').strip()
+        return Response(partidas_de_sst_ocupadas(codigo, suministro, externo))
 
     @action(detail=False, methods=['get'])
     def correcciones(self, request):
