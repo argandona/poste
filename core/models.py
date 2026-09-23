@@ -716,8 +716,13 @@ class TipoTrabajoManoDeObra(models.Model):
     # Lo que se propone al elegir el tipo de trabajo. El capataz lo corrige si
     # en obra salió distinto; cero significa que arranca en blanco.
     cantidad_inicial = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    # En qué orden se le muestran al capataz. El orden es el de la obra: el
+    # arrastre antes que el acarreo que se calcula desde él. En cero, manda
+    # el orden en que se cargaron.
+    orden        = models.PositiveIntegerField(default=0)
     class Meta:
         db_table = "tipo_trabajo_mano_de_obra"
+        ordering = ["orden", "id_tipo_trabajo_mano_de_obra"]
         unique_together = (("tipo_trabajo", "mano_de_obra"),)
     def __str__(self):
         return f"{self.tipo_trabajo} – {self.mano_de_obra}"
