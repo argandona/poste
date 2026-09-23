@@ -5,8 +5,10 @@ La plantilla es la misma que se llenaba a mano (Liquidacion.xls), pasada a
 formatos y las demás hojas quedan como vienen.
 
 - Carátula: SST, cliente, actividad, distrito, fechas, contratista y capataz.
-- MATERIAL: la cantidad va en la columna AV.
-- MANO DE OBRA: la cantidad va en P1 (columna F), que suma la columna Cant.
+- MATERIAL: la cantidad va en la columna del poste, AV a AX (P1, P2, P3).
+- MANO DE OBRA: la cantidad va en la columna del poste, F a H (P1, P2, P3),
+  que la plantilla suma en Cant. Con un solo poste -lo normal- todo cae en P1,
+  como salía antes; en una reforma cada punto de trabajo tiene la suya.
 - Cables: los metros de cable de hasta 35 mm2, un tramo del plano por vano y
   desde la columna I hacia la derecha. Lo instalado va en la fila 52 y lo
   trasladado en la 53, como las rotula la plantilla.
@@ -27,10 +29,14 @@ PLANTILLA = Path(__file__).resolve().parent / 'data' / 'plantilla_liquidacion.xl
 
 # Hoja MATERIAL
 MAT_PRIMERA, MAT_ULTIMA = 14, 170
-MAT_CANTIDAD = 'AV'
+# Una columna por poste. La plantilla trae tres y las suma; si hubiera más
+# postes, el último se lleva el resto para que el total siga cuadrando.
+MAT_POSTES = ('AV', 'AW', 'AX')
+MAT_CANTIDAD = MAT_POSTES[0]
 # Hoja MANO DE OBRA
 MO_PRIMERA, MO_ULTIMA = 7, 112
-MO_CANTIDAD = 'F'
+MO_POSTES = ('F', 'G', 'H')
+MO_CANTIDAD = MO_POSTES[0]
 # Hoja Cables: la plantilla rotula la fila 52 como instalación y la 53 como
 # traslado, cada una con seis vanos que suma su columna O.
 CABLES_INSTALADO = 52
@@ -74,10 +80,16 @@ def _hoja_carátula(wb):
     return wb.worksheets[0]
 
 
-def generar_excel_liquidacion(encabezado, materiales, partidas, elementos_plano=()):
+def generar_excel_liquidacion(encabezado, materiales, partidas,
+                              elementos_plano=(), materiales_por_poste=(),
+                              partidas_por_poste=()):
     """`encabezado`: sst, actividad, distrito, fecha (date o None), contratista,
-    capataz. `materiales` y `partidas`: listas de Item de cuaderno_obra.
-    `elementos_plano`: lo guardado en el plano de la SST."""
+    capataz. `materiales` y `partidas`: listas de Item de cuaderno_obra, con el
+    total de la SST. `elementos_plano`: lo guardado en el plano de la SST.
+
+    `materiales_por_poste` y `partidas_por_poste` son listas de listas de Item,
+    una por punto de trabajo. Con uno solo no hacen falta: el total ya va en su
+    columna."""
     wb = load_workbook(PLANTILLA)
 
     car = _hoja_carátula(wb)
@@ -93,8 +105,8 @@ def generar_excel_liquidacion(encabezado, materiales, partidas, elementos_plano=
     car['H16'] = encabezado.get('contratista', '')
     car['H18'] = encabezado.get('capataz', '')
 
-    _llenar_material(wb['MATERIAL'], materiales)
-    _llenar_mano_de_obra(wb['MANO DE OBRA'], partidas)
+    _llenar_material(wb['MATERIAL'], materiales, materiales_por_poste)
+    _llenar_mano_de_obra(wb['MANO DE OBRA'], partidas, partidas_por_poste)
     _llenar_cables(wb['Cables'], elementos_plano)
     _llenar_veredas(wb['Vereda'], elementos_plano)
     _llenar_traslado_acarreo(wb['Traslado - Acarreo'], elementos_plano)
@@ -104,7 +116,8 @@ def generar_excel_liquidacion(encabezado, materiales, partidas, elementos_plano=
     return buffer.getvalue()
 
 
-def _llenar_material(ws, materiales):
+def _llenar_material(ws, materiales, por_poste=()):
+    escritas = []
     filas = {}
     libres = []
     for fila in range(MAT_PRIMERA, MAT_ULTIMA + 1):
@@ -124,9 +137,39 @@ def _llenar_material(ws, materiales):
             ws[f'D{fila}'] = float(m.precio)
             filas[_clave(m.codigo)] = fila
         ws[f'{MAT_CANTIDAD}{fila}'] = float(m.cantidad)
+        escritas.append(fila)
+    _por_columna(ws, filas, por_poste, MAT_POSTES, escritas)
 
 
-def _llenar_mano_de_obra(ws, partidas):
+def _por_columna(ws, filas, por_poste, columnas, escritas):
+    """Reparte lo de cada poste en su columna.
+
+    Sin postes que repartir no se toca nada: queda el total en la primera
+    columna, que es como sale una SST de un solo poste. Con más postes que
+    columnas, la última se lleva la suma del resto, para que el total de la
+    fila siga cuadrando."""
+    if len(por_poste) < 2:
+        return
+    ultima = len(columnas) - 1
+    acumulado = {}
+    for i, items in enumerate(por_poste):
+        columna = columnas[min(i, ultima)]
+        for item in items:
+            fila = filas.get(_clave(item.codigo))
+            if fila is None:
+                continue
+            clave = (columna, fila)
+            acumulado[clave] = acumulado.get(clave, 0) + float(item.cantidad)
+    # El total quedó en la primera columna: se borra antes de repartirlo, y
+    # solo en las filas que se escribieron.
+    for fila in escritas:
+        ws[f'{columnas[0]}{fila}'] = None
+    for (columna, fila), cantidad in acumulado.items():
+        ws[f'{columna}{fila}'] = cantidad
+
+
+def _llenar_mano_de_obra(ws, partidas, por_poste=()):
+    escritas = []
     filas = {}
     libres = []
     for fila in range(MO_PRIMERA, MO_ULTIMA + 1):
@@ -150,6 +193,8 @@ def _llenar_mano_de_obra(ws, partidas):
             ws[f'M{fila}'] = f'=IF(A{fila}=0,"",(L{fila}*$E{fila}))'
             filas[_clave(p.codigo)] = fila
         ws[f'{MO_CANTIDAD}{fila}'] = float(p.cantidad)
+        escritas.append(fila)
+    _por_columna(ws, filas, por_poste, MO_POSTES, escritas)
 
 
 def tramos_hasta_35(elementos_plano, estado='T'):

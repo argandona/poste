@@ -202,6 +202,87 @@ def _derivaciones(agregadas, regla, partidas, num, buscar_partida):
     entrada['cobra'] += max(cantidad - umbral, Decimal('0'))
 
 
+def _por_poste_de_sst(sst):
+    """Lo liquidado agrupado por poste: (número, actividad, partidas).
+
+    El descuento de lo incluido se calcula por poste, así que primero hay que
+    separarlo. El orden es el de la primera liquidación de cada uno, que es
+    como el capataz los fue cargando."""
+    from django.db.models import Q
+
+    from .models import ActividadTipoTrabajo, LiquidacionSuministro, Suministro
+
+    codigo = sst.codigo or sst.sst
+    suministros = list(Suministro.objects.filter(sst_suministros__sst=sst))
+    filtro = Q(suministro__in=suministros)
+    if codigo:
+        filtro |= Q(sst_externo=codigo)
+    liquidaciones = (LiquidacionSuministro.objects.filter(filtro)
+                     .select_related('tipo_trabajo', 'suministro')
+                     .prefetch_related('partidas__mano_de_obra')
+                     .order_by('id_liquidacion'))
+
+    # La actividad se detecta por el tipo de trabajo liquidado, igual que en el
+    # consolidado: es más confiable que lo que diga el registro de la SST.
+    actividad_de = {}
+    for att in ActividadTipoTrabajo.objects.select_related('actividad'):
+        actividad_de.setdefault(att.tipo_trabajo_id, att.actividad.nombre)
+
+    postes = {}
+    for liq in liquidaciones:
+        clave = liq.suministro_id or liq.suministro_externo or ''
+        poste = postes.setdefault(clave, {
+            'numero': (liq.suministro.numero_suministro if liq.suministro_id
+                       else liq.suministro_externo or ''),
+            'act': '', 'partidas': {},
+        })
+        nombre = actividad_de.get(liq.tipo_trabajo_id, '')
+        if nombre and (norm_actividad(nombre) in INCLUSIONES_CONSOLIDADO
+                       or not poste['act']):
+            poste['act'] = nombre
+        for lp in liq.partidas.all():
+            mo = lp.mano_de_obra
+            entrada = poste['partidas'].setdefault(
+                mo.partida, {'mo': mo, 'cantidad': Decimal('0')})
+            entrada['cantidad'] += lp.cantidad
+    return list(postes.values())
+
+
+def _buscador_de_partidas():
+    """Trae del catálogo las partidas que nacen de una derivación."""
+    from .models import ManoDeObra
+
+    cache = {}
+
+    def buscar(codigo):
+        if codigo not in cache:
+            cache[codigo] = ManoDeObra.objects.filter(partida=codigo).first()
+        return cache[codigo]
+
+    return buscar
+
+
+def partidas_cobradas_por_poste(sst):
+    """Lo que se cobra en cada poste, por separado.
+
+    Es lo que el Excel pone en la columna de cada punto de trabajo. El
+    descuento se calcula igual que en el consolidado, pero sin sumar entre
+    postes: cada columna dice lo suyo."""
+    from .cuaderno_obra import Item
+
+    buscar = _buscador_de_partidas()
+    salida = []
+    for poste in _por_poste_de_sst(sst):
+        agregadas, _ = consolidar_partidas(
+            [(norm_actividad(poste['act']), poste['partidas'])],
+            INCLUSIONES_CONSOLIDADO, buscar)
+        salida.append((poste['numero'], [
+            Item(codigo, e['mo'].descripcion, e['cobra'], e['mo'].precio)
+            for codigo, e in sorted(agregadas.items())
+        ]))
+    return salida
+
+
 def partidas_cobradas(sst):
     """Las partidas de una SST tal como se cobran.
 

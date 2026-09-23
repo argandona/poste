@@ -15,7 +15,7 @@ def con_rol(*roles):
 
 from .inclusiones import (
     INCLUSIONES_CONSOLIDADO, consolidar_partidas, partidas_cobradas,
-    norm_actividad as _norm_txt,
+    partidas_cobradas_por_poste, norm_actividad as _norm_txt,
 )
 
 
@@ -1859,7 +1859,11 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
             'fecha': sst.fecha_ejecucion,
             'contratista': sst.empresa.nombre if sst.empresa_id else '',
             'capataz': datos.capataz,
-        }, datos.materiales, partidas_cobradas(sst), datos.elementos_plano)
+        }, datos.materiales, partidas_cobradas(sst), datos.elementos_plano,
+            materiales_por_poste=[p.materiales for p in datos.por_poste],
+            partidas_por_poste=[
+                partidas for _numero, partidas in partidas_cobradas_por_poste(sst)
+            ])
         resp = HttpResponse(
             contenido,
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
