@@ -285,9 +285,14 @@ class SSTSuministro(models.Model):
     sst        = models.ForeignKey(SST,        on_delete=models.PROTECT, related_name="sst_suministros")
     suministro = models.ForeignKey(Suministro, on_delete=models.PROTECT, related_name="sst_suministros")
     asignado_a = models.ForeignKey(Usuario,    on_delete=models.SET_NULL, null=True, blank=True, related_name="suministros_asignados")
+    # En qué orden se trabajan los postes de la SST. Decide en qué columna del
+    # Excel cae cada uno (P1, P2, P3) y el orden del cuaderno, así que el
+    # capataz lo puede acomodar. En cero manda el orden en que se agregaron.
+    orden      = models.PositiveIntegerField(default=0)
     class Meta:
         db_table = "sst_suministro"
         unique_together = (("sst", "suministro"),)
+        ordering = ["orden", "id_sst_suministro"]
     def __str__(self):
         return f"{self.sst} → {self.suministro}"
 

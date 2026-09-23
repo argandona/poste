@@ -8,7 +8,10 @@ en cambio de poste una SST es un poste y ahí esto no se puede.
 from datetime import date
 
 from ..models import (
-    Actividad, SST, SSTSuministro, Suministro,
+    Actividad, ConsumoMaterialSuministro, CorreccionLiquidacion,
+    LiquidacionPartida, LiquidacionSuministro, ManoDeObra, Recupero, Rol, SST,
+    SSTSuministro, StockCamion, Suministro, SuministroRecupero, TipoTrabajo,
+    Usuario,
 )
 from .base import BaseAPITestCase
 
@@ -164,3 +167,231 @@ class PuntoDeTrabajoTests(BaseAPITestCase):
         porque = {a["nombre"]: a["varios_postes"] for a in datos}
         self.assertTrue(porque[REFORMA])
         self.assertFalse(porque[AEREA])
+
+
+class EditarPuntosTests(BaseAPITestCase):
+    """Corregir los puntos de trabajo: renombrarlos, moverlos y quitarlos.
+
+    El capataz los va agregando en obra y se equivoca: teclea mal un número,
+    los crea en otro orden del que trabajó, o suma uno que no era. Todo eso se
+    arregla desde la misma pantalla.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.reforma = Actividad.objects.create(
+            nombre=REFORMA, varios_postes=True)
+        self.sst = SST.objects.create(
+            sst="3920624", codigo="SST-3920624", empresa=self.empresa,
+            distrito="SURCO", actividad=self.reforma,
+            fecha_ejecucion=date.today())
+        self.tipo = TipoTrabajo.objects.create(nombre="Poste cabria")
+        self.partida = ManoDeObra.objects.create(
+            partida="*094395", descripcion="INSPECCION", precio="53.30")
+
+    def agregar(self, numero):
+        self.auth(self.capataz)
+        r = self.client.post("/api/ssts/agregar_punto/", {
+            "sst_codigo": self.sst.codigo, "numero_suministro": numero,
+        }, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        return r.data["id_suministro"]
+
+    def numeros(self):
+        self.auth(self.capataz)
+        r = self.client.get("/api/ssts/puntos/",
+                            {"sst_codigo": self.sst.codigo})
+        return [p["numero_suministro"] for p in r.data["puntos"]]
+
+    def liquidar(self, id_suministro, cantidad=1):
+        liq = LiquidacionSuministro.objects.create(
+            suministro_id=id_suministro, sst_externo=self.sst.codigo,
+            usuario=self.capataz, tipo_trabajo=self.tipo)
+        LiquidacionPartida.objects.create(
+            liquidacion=liq, mano_de_obra=self.partida, cantidad=cantidad)
+        return liq
+
+    # ── Renombrar ───────────────────────────────────────────────────────────
+
+    def test_se_corrige_el_numero(self):
+        uno = self.agregar("771000100")
+        self.auth(self.capataz)
+        r = self.client.post("/api/ssts/renombrar_punto/", {
+            "sst_codigo": self.sst.codigo, "id_suministro": uno,
+            "numero_suministro": "771000199",
+        }, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(self.numeros(), ["771000199"])
+
+    def test_lo_liquidado_sigue_colgado_del_punto(self):
+        """Renombrar es corregir un tipeo: no se pierde nada."""
+        uno = self.agregar("771000100")
+        liq = self.liquidar(uno)
+        self.auth(self.capataz)
+        self.client.post("/api/ssts/renombrar_punto/", {
+            "sst_codigo": self.sst.codigo, "id_suministro": uno,
+            "numero_suministro": "771000199",
+        }, format="json")
+        liq.refresh_from_db()
+        self.assertEqual(liq.suministro.numero_suministro, "771000199")
+
+    def test_no_se_puede_pisar_un_numero_que_ya_existe(self):
+        uno = self.agregar("771000100")
+        self.agregar("771000101")
+        self.auth(self.capataz)
+        r = self.client.post("/api/ssts/renombrar_punto/", {
+            "sst_codigo": self.sst.codigo, "id_suministro": uno,
+            "numero_suministro": "771000101",
+        }, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("ya existe", r.data["detail"])
+
+    # ── Mover ───────────────────────────────────────────────────────────────
+
+    def test_se_pueden_acomodar_en_otro_orden(self):
+        uno = self.agregar("Poste 01")
+        dos = self.agregar("Poste 02")
+        tres = self.agregar("091002020")
+        self.assertEqual(self.numeros(), ["Poste 01", "Poste 02", "091002020"])
+        self.auth(self.capataz)
+        r = self.client.post("/api/ssts/ordenar_puntos/", {
+            "sst_codigo": self.sst.codigo, "ids": [tres, uno, dos],
+        }, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(self.numeros(), ["091002020", "Poste 01", "Poste 02"])
+
+    def test_un_punto_que_no_vino_en_la_lista_queda_al_final(self):
+        uno = self.agregar("771000100")
+        dos = self.agregar("771000101")
+        self.agregar("771000102")
+        self.auth(self.capataz)
+        self.client.post("/api/ssts/ordenar_puntos/", {
+            "sst_codigo": self.sst.codigo, "ids": [dos, uno],
+        }, format="json")
+        self.assertEqual(self.numeros(),
+                         ["771000101", "771000100", "771000102"])
+
+    def test_no_se_puede_meter_un_punto_de_otra_sst(self):
+        self.agregar("771000100")
+        otra = SST.objects.create(
+            sst="9999", codigo="SST-9999", empresa=self.empresa,
+            distrito="LIMA", actividad=self.reforma)
+        ajeno = Suministro.objects.create(numero_suministro="880000100")
+        SSTSuministro.objects.create(sst=otra, suministro=ajeno)
+        self.auth(self.capataz)
+        r = self.client.post("/api/ssts/ordenar_puntos/", {
+            "sst_codigo": self.sst.codigo, "ids": [ajeno.pk],
+        }, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_el_punto_nuevo_se_agrega_al_final(self):
+        uno = self.agregar("771000100")
+        dos = self.agregar("771000101")
+        self.auth(self.capataz)
+        self.client.post("/api/ssts/ordenar_puntos/", {
+            "sst_codigo": self.sst.codigo, "ids": [dos, uno],
+        }, format="json")
+        self.agregar("771000102")
+        self.assertEqual(self.numeros(),
+                         ["771000101", "771000100", "771000102"])
+
+    # ── Quitar ──────────────────────────────────────────────────────────────
+
+    def test_se_quita_un_punto_vacio(self):
+        self.agregar("771000100")
+        dos = self.agregar("771000101")
+        self.auth(self.capataz)
+        r = self.client.post("/api/ssts/quitar_punto/", {
+            "sst_codigo": self.sst.codigo, "id_suministro": dos,
+        }, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(self.numeros(), ["771000100"])
+        self.assertFalse(
+            Suministro.objects.filter(numero_suministro="771000101").exists())
+
+    def test_se_lleva_lo_liquidado_y_el_recupero(self):
+        uno = self.agregar("771000100")
+        self.liquidar(uno)
+        recupero = Recupero.objects.create(
+            matricula="REC-001", descripcion="CABLE CAAIS 3X16+1X16")
+        SuministroRecupero.objects.create(
+            suministro_id=uno, recupero=recupero, cantidad=12,
+            fecha=date.today())
+        self.auth(self.capataz)
+        r = self.client.post("/api/ssts/quitar_punto/", {
+            "sst_codigo": self.sst.codigo, "id_suministro": uno,
+        }, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["liquidaciones_borradas"], 1)
+        self.assertEqual(r.data["recuperos_borrados"], 1)
+        self.assertEqual(LiquidacionSuministro.objects.count(), 0)
+        self.assertEqual(SuministroRecupero.objects.count(), 0)
+
+    def test_queda_el_acta_de_lo_que_se_borro(self):
+        """El usuario pidió que el punto se fuera entero, pero lo que decía
+        queda registrado: es plata que alguien liquidó."""
+        uno = self.agregar("771000100")
+        self.liquidar(uno, cantidad=3)
+        self.auth(self.capataz)
+        self.client.post("/api/ssts/quitar_punto/", {
+            "sst_codigo": self.sst.codigo, "id_suministro": uno,
+        }, format="json")
+        acta = CorreccionLiquidacion.objects.get()
+        self.assertIn("Se eliminó el punto de trabajo 771000100",
+                      acta.cambios)
+        self.assertEqual(acta.anterior["partidas"][0]["cantidad"], "3")
+
+    def test_el_material_vuelve_al_camion(self):
+        uno = self.agregar("771000100")
+        stock = StockCamion.objects.create(
+            camion=self.camion, material=self.material_a, cantidad=10)
+        liq = self.liquidar(uno)
+        ConsumoMaterialSuministro.objects.create(
+            liquidacion=liq, suministro_id=uno, material=self.material_a,
+            usuario=self.capataz, cantidad=4)
+        self.auth(self.capataz)
+        self.client.post("/api/ssts/quitar_punto/", {
+            "sst_codigo": self.sst.codigo, "id_suministro": uno,
+        }, format="json")
+        stock.refresh_from_db()
+        self.assertEqual(str(stock.cantidad), "14.00")
+
+    def test_un_punto_de_otra_sst_no_se_toca(self):
+        # El capataz trabaja en esta SST, pero el punto que manda es de otra.
+        self.agregar("771000100")
+        otra = SST.objects.create(
+            sst="9999", codigo="SST-9999", empresa=self.empresa,
+            distrito="LIMA", actividad=self.reforma)
+        ajeno = Suministro.objects.create(numero_suministro="880000100")
+        SSTSuministro.objects.create(sst=otra, suministro=ajeno)
+        self.auth(self.capataz)
+        r = self.client.post("/api/ssts/quitar_punto/", {
+            "sst_codigo": self.sst.codigo, "id_suministro": ajeno.pk,
+        }, format="json")
+        self.assertEqual(r.status_code, 404)
+
+    # ── Quién puede ─────────────────────────────────────────────────────────
+
+    def test_alguien_ajeno_a_la_sst_no_puede(self):
+        uno = self.agregar("771000100")
+        r = self.client.post("/api/ssts/quitar_punto/", {
+            "sst_codigo": self.sst.codigo, "id_suministro": uno,
+        }, format="json")
+        self.auth(self.encargado)
+        r = self.client.post("/api/ssts/quitar_punto/", {
+            "sst_codigo": self.sst.codigo, "id_suministro": uno,
+        }, format="json")
+        self.assertEqual(r.status_code, 403)
+
+    def test_el_coordinador_si_puede(self):
+        uno = self.agregar("771000100")
+        Rol.objects.get_or_create(
+            id_rol=Rol.COORDINADOR, defaults={"descripcion": "Coordinador"})
+        coordinador = Usuario.objects.create(
+            nombre="Coordinador Uno", rol_id=Rol.COORDINADOR,
+            empresa=self.empresa, email="coord@tecsur.pe", clave="x")
+        self.auth(coordinador)
+        r = self.client.post("/api/ssts/quitar_punto/", {
+            "sst_codigo": self.sst.codigo, "id_suministro": uno,
+        }, format="json")
+        self.assertEqual(r.status_code, 200, r.data)

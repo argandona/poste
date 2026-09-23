@@ -387,8 +387,7 @@ class SSTViewSet(viewsets.ModelViewSet):
             return Response({'detail': f'No existe la SST {codigo}.'}, status=404)
         relaciones = (SSTSuministro.objects
                       .filter(sst=sst)
-                      .select_related('suministro')
-                      .order_by('id_sst_suministro'))
+                      .select_related('suministro'))
         return Response({
             'sst_codigo':    sst.codigo or sst.sst or '',
             'actividad':     sst.actividad.nombre if sst.actividad_id else '',
@@ -458,8 +457,11 @@ class SSTViewSet(viewsets.ModelViewSet):
                 distrito=sst.distrito or '',
                 estado='asignado')
 
+        ultimo = (SSTSuministro.objects.filter(sst=sst)
+                  .order_by('-orden').values_list('orden', flat=True).first())
         SSTSuministro.objects.create(
-            sst=sst, suministro=suministro, asignado_a=actor)
+            sst=sst, suministro=suministro, asignado_a=actor,
+            orden=(ultimo or 0) + 1)
         return Response({
             'id_suministro':     suministro.id_suministro,
             'numero_suministro': suministro.numero_suministro,
@@ -467,6 +469,187 @@ class SSTViewSet(viewsets.ModelViewSet):
             'distrito':          suministro.distrito,
             'actividad':         sst.actividad.nombre,
         }, status=201)
+
+    def _punto_de(self, request, solo_por_id=False):
+        """La SST y el punto de trabajo que pide el cuerpo, o un error.
+
+        Devuelve (sst, relacion, error): si hay error, los otros dos son None.
+        """
+        codigo = (request.data.get('sst_codigo') or '').strip()
+        id_suministro = request.data.get('id_suministro')
+        # Al renombrar, `numero_suministro` es el nombre NUEVO: ahí el punto
+        # solo se puede buscar por su id.
+        numero = ('' if solo_por_id
+                  else (request.data.get('numero_suministro') or '').strip())
+        if not codigo or not (id_suministro or numero):
+            return None, None, Response(
+                {'detail': 'sst_codigo y el punto son obligatorios.'}, status=400)
+        sst = (qs_empresa(SST.objects.select_related('actividad'), request)
+               .filter(models.Q(codigo=codigo) | models.Q(sst=codigo)).first())
+        if sst is None:
+            return None, None, Response(
+                {'detail': f'No existe la SST {codigo}.'}, status=404)
+        if not self._trabaja_en(request, sst):
+            return None, None, Response(
+                {'detail': 'Esta SST no es suya.'}, status=403)
+        relaciones = SSTSuministro.objects.filter(sst=sst).select_related(
+            'suministro')
+        rel = (relaciones.filter(suministro_id=id_suministro).first()
+               if id_suministro
+               else relaciones.filter(
+                   suministro__numero_suministro=numero).first())
+        if rel is None:
+            return None, None, Response(
+                {'detail': 'Ese punto no está en esta SST.'}, status=404)
+        return sst, rel, None
+
+    def _trabaja_en(self, request, sst):
+        """Si quien pide tiene algo que ver con esa SST.
+
+        El capataz corrige los puntos de las SST en las que trabaja; el
+        coordinador, los de cualquiera."""
+        actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
+        if actor is None:
+            return False
+        if actor.puede_asignar_sst():
+            return True
+        return (SSTSuministro.objects.filter(sst=sst, asignado_a=actor).exists()
+                or SSTEncargado.objects.filter(sst=sst, usuario=actor).exists())
+
+    @action(detail=False, methods=['post'])
+    def renombrar_punto(self, request):
+        """POST /api/ssts/renombrar_punto/  { sst_codigo, id_suministro, numero_suministro }
+
+        Corrige el número de un poste. Lo liquidado sigue colgado de él, así
+        que el consolidado, el Excel y el cuaderno pasan a decir el número
+        bueno: es lo que se quiere cuando el número se tecleó mal."""
+        nuevo = (request.data.get('numero_suministro') or '').strip()
+        id_suministro = request.data.get('id_suministro')
+        if not id_suministro or not nuevo:
+            return Response(
+                {'detail': 'id_suministro y numero_suministro son obligatorios.'},
+                status=400)
+        sst, rel, error = self._punto_de(request, solo_por_id=True)
+        if error:
+            return error
+        otro = (Suministro.objects
+                .filter(numero_suministro=nuevo)
+                .exclude(pk=rel.suministro_id).first())
+        if otro is not None:
+            return Response(
+                {'detail': f'El poste {nuevo} ya existe en el sistema.'},
+                status=400)
+        anterior = rel.suministro.numero_suministro
+        rel.suministro.numero_suministro = nuevo
+        rel.suministro.save(update_fields=['numero_suministro'])
+        return Response({
+            'id_suministro': rel.suministro_id,
+            'numero_suministro': nuevo,
+            'anterior': anterior,
+        })
+
+    @action(detail=False, methods=['post'])
+    def ordenar_puntos(self, request):
+        """POST /api/ssts/ordenar_puntos/  { sst_codigo, ids: [...] }
+
+        Acomoda los puntos en el orden que manda la lista. Ese orden decide
+        en qué columna del Excel cae cada poste y el orden del cuaderno, así
+        que lo maneja quien trabaja la SST."""
+        codigo = (request.data.get('sst_codigo') or '').strip()
+        ids = request.data.get('ids') or []
+        if not codigo or not isinstance(ids, list) or not ids:
+            return Response(
+                {'detail': 'sst_codigo e ids son obligatorios.'}, status=400)
+        sst = (qs_empresa(SST.objects.all(), request)
+               .filter(models.Q(codigo=codigo) | models.Q(sst=codigo)).first())
+        if sst is None:
+            return Response({'detail': f'No existe la SST {codigo}.'}, status=404)
+        if not self._trabaja_en(request, sst):
+            return Response({'detail': 'Esta SST no es suya.'}, status=403)
+
+        relaciones = {r.suministro_id: r
+                      for r in SSTSuministro.objects.filter(sst=sst)}
+        faltan = [i for i in ids if i not in relaciones]
+        if faltan:
+            return Response(
+                {'detail': 'Hay puntos en la lista que no son de esta SST.'},
+                status=400)
+        for orden, id_suministro in enumerate(ids):
+            rel = relaciones.pop(id_suministro)
+            rel.orden = orden
+            rel.save(update_fields=['orden'])
+        # Lo que no vino en la lista queda al final, en el orden que tenía.
+        for extra, rel in enumerate(relaciones.values()):
+            rel.orden = len(ids) + extra
+            rel.save(update_fields=['orden'])
+        return Response({'ids': ids})
+
+    @action(detail=False, methods=['post'])
+    def quitar_punto(self, request):
+        """POST /api/ssts/quitar_punto/  { sst_codigo, id_suministro }
+
+        Saca un poste de la SST con todo lo suyo: sus liquidaciones, el
+        material que consumió —que vuelve al camión— y su recupero.
+
+        Antes de borrar se levanta el acta de cada liquidación, en la misma
+        tabla del historial de correcciones: el usuario pidió que el punto se
+        fuera entero, pero lo que decía queda registrado."""
+        from .serializers import (
+            LiquidacionSuministroCreateSerializer, _retrato_liquidacion,
+        )
+
+        sst, rel, error = self._punto_de(request)
+        if error:
+            return error
+
+        suministro = rel.suministro
+        numero = suministro.numero_suministro
+        with transaction.atomic():
+            liquidaciones = list(
+                LiquidacionSuministro.objects
+                .filter(models.Q(suministro=suministro) |
+                        models.Q(suministro_externo=numero,
+                                 sst_externo=sst.codigo or sst.sst))
+                .select_related('usuario', 'tipo_trabajo')
+                .prefetch_related('partidas__mano_de_obra',
+                                  'materiales_consumidos__material'))
+            actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
+            for liq in liquidaciones:
+                CorreccionLiquidacion.objects.create(
+                    suministro=None,
+                    suministro_externo=numero,
+                    sst_externo=sst.codigo or sst.sst or '',
+                    tipo_trabajo=liq.tipo_trabajo,
+                    usuario_anterior=liq.usuario,
+                    usuario=actor or liq.usuario,
+                    fecha_anterior=liq.fecha,
+                    anterior=_retrato_liquidacion(liq),
+                    cambios=f'Se eliminó el punto de trabajo {numero} con '
+                            'toda su liquidación.',
+                )
+            # El material vuelve al camión de quien lo cargó, igual que al
+            # corregir una liquidación.
+            LiquidacionSuministroCreateSerializer._devolver_al_camion(
+                liquidaciones)
+            borradas = len(liquidaciones)
+            for liq in liquidaciones:
+                liq.delete()
+            ConsumoMaterialSuministro.objects.filter(
+                suministro=suministro).delete()
+            recuperados = SuministroRecupero.objects.filter(
+                suministro=suministro).count()
+            SuministroRecupero.objects.filter(suministro=suministro).delete()
+            SuministroTipoTrabajo.objects.filter(suministro=suministro).delete()
+            SuministroManoDeObra.objects.filter(suministro=suministro).delete()
+            rel.delete()
+            # El poste solo se borra si no quedó colgado de otra SST.
+            if not SSTSuministro.objects.filter(suministro=suministro).exists():
+                suministro.delete()
+        return Response({
+            'numero_suministro': numero,
+            'liquidaciones_borradas': borradas,
+            'recuperos_borrados': recuperados,
+        })
 
     @action(detail=True, methods=['get'])
     def suministros(self, request, pk=None):
