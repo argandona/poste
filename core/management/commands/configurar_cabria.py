@@ -168,6 +168,8 @@ CATALOGO = {
             "*091842": 0,  # corte de vereda       (a mano)
             "*090248": 0,  # colocación de trípodes (a mano)
             "*090636": 0,  # traslado de postes a disposición final
+            "*090632": 0,  # arrastre en pendiente (excluyente con *090630)
+            "*090630": 0,  # arrastre en plano     (excluyente con *090632)
             "*090634": 0,  # traslado manual       (excedente del arrastre)
             "*090633": 0,  # acarreo para cimentación
             "*094913": 0,  # punta de diamante     (a mano)
@@ -175,8 +177,6 @@ CATALOGO = {
             "*094911": 0,  # solera de concreto    (a mano)
             "*090482": 0,  # instalación de poste provisional
             "*090468": 0,  # retiro de poste provisional
-            "*090632": 0,  # arrastre en pendiente (excluyente con *090630)
-            "*090630": 0,  # arrastre en plano     (excluyente con *090632)
             "*090471": 0,  # cambio de poste sin vereda
             "*090470": 0,  # cambio de poste con vereda
             "*090163": 0,  # traslado de cable autosoportado
@@ -422,13 +422,15 @@ class Command(BaseCommand):
         (TipoTrabajoManoDeObra.objects
          .filter(tipo_trabajo=tipo)
          .exclude(mano_de_obra__in=partidas.values()).delete())
-        for codigo, cantidad in config["mano_de_obra"].items():
+        # El orden en que están escritas aquí es el que ve el capataz: el
+        # arrastre antes que el acarreo, que se calcula desde él.
+        for orden, (codigo, cantidad) in enumerate(config["mano_de_obra"].items()):
             partida = partidas.get(codigo)
             if partida is None:
                 continue
             TipoTrabajoManoDeObra.objects.update_or_create(
                 tipo_trabajo=tipo, mano_de_obra=partida,
-                defaults={"cantidad_inicial": cantidad})
+                defaults={"cantidad_inicial": cantidad, "orden": orden})
 
         self.stdout.write(
             f"  {tipo.nombre}: {tipo.materiales.count()} materiales, "

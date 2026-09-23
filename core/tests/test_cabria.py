@@ -61,6 +61,39 @@ class ConfigurarCabriaTests(BaseAPITestCase):
         self.assertEqual(por_matricula["5335110"], 2)
         self.assertEqual(por_matricula["5461238"], 14)
 
+    def test_el_arrastre_va_antes_que_el_acarreo(self):
+        """El acarreo se calcula desde el arrastre, así que leerlo después
+        es el orden de la obra. Lo pidió el usuario el 2026-09-22."""
+        self._catalogo_completo()
+        call_command("configurar_cabria", verbosity=0)
+        tipo = TipoTrabajo.objects.get(nombre="Poste cabria")
+        orden = [p.mano_de_obra.partida for p in tipo.partidas.all()]
+        self.assertLess(orden.index("*090632"), orden.index("*090633"))
+        self.assertLess(orden.index("*090632"), orden.index("*090634"))
+        self.assertLess(orden.index("*090630"), orden.index("*090633"))
+        self.assertLess(orden.index("*090630"), orden.index("*090634"))
+
+    def test_el_orden_del_catalogo_es_el_que_ve_el_capataz(self):
+        """No basta con escribirlas en orden: sin el campo, la lista salía en
+        el orden en que se crearon las filas."""
+        self._catalogo_completo()
+        call_command("configurar_cabria", verbosity=0)
+        tipo = TipoTrabajo.objects.get(nombre="Poste cabria")
+        ordenes = [p.orden for p in tipo.partidas.all()]
+        self.assertEqual(ordenes, sorted(ordenes))
+        self.assertEqual(len(set(ordenes)), len(ordenes))
+
+    def test_reordenar_el_catalogo_reordena_lo_que_se_ve(self):
+        self._catalogo_completo()
+        call_command("configurar_cabria", verbosity=0)
+        tipo = TipoTrabajo.objects.get(nombre="Poste cabria")
+        primera = tipo.partidas.first()
+        # Se la manda al final a mano y el comando la devuelve a su sitio.
+        primera.orden = 999
+        primera.save(update_fields=["orden"])
+        call_command("configurar_cabria", verbosity=0)
+        self.assertEqual(tipo.partidas.first().pk, primera.pk)
+
     def test_retiros_otros_cabria_es_solo_mano_de_obra(self):
         self._catalogo_completo()
         call_command("configurar_cabria", verbosity=0)
