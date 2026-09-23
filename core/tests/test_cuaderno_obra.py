@@ -608,6 +608,103 @@ class DescargasTests(BaseAPITestCase):
                              'metros': m} for m in (10, 20, 30, 40, 5, 7, 8)])
         self.assertEqual([ws[f'{c}53'].value for c in 'IJKLMN'], [10, 20, 30, 40, 5, 15])
 
+    # ── Una columna por punto de trabajo ────────────────────────────────────
+
+    def sst_de_reforma(self):
+        """Una SST de reforma con dos postes, cada uno con lo suyo."""
+        reforma = Actividad.objects.create(
+            nombre='Reforma - cambio de poste inacc. aereo - cabria',
+            varios_postes=True)
+        self.sst.actividad = reforma
+        self.sst.save(update_fields=['actividad'])
+        tipo = TipoTrabajo.objects.get_or_create(nombre='Poste cabria')[0]
+        ActividadTipoTrabajo.objects.get_or_create(
+            actividad=reforma, tipo_trabajo=tipo)
+        otro = Suministro.objects.create(numero_suministro='P-7789')
+        SSTSuministro.objects.create(sst=self.sst, suministro=otro)
+        return tipo, otro
+
+    def liquidar_poste(self, tipo, poste, partida, cantidad, material=None,
+                       cantidad_material=0):
+        liq = LiquidacionSuministro.objects.create(
+            suministro=poste, sst_externo=self.sst.codigo,
+            usuario=self.capataz, tipo_trabajo=tipo)
+        LiquidacionPartida.objects.create(
+            liquidacion=liq, mano_de_obra=partida, cantidad=cantidad)
+        if material is not None:
+            ConsumoMaterialSuministro.objects.create(
+                liquidacion=liq, suministro=poste, material=material,
+                usuario=self.capataz, cantidad=cantidad_material)
+        return liq
+
+    def columnas(self, hoja, filas, columnas):
+        wb = load_workbook(io.BytesIO(
+            self.get('/api/liquidaciones/excel/').content))
+        ws = wb[hoja]
+        return {c: [ws[f'{c}{f}'].value for f in filas] for c in columnas}
+
+    def test_con_un_solo_poste_todo_va_en_p1(self):
+        """Lo que ya funcionaba tiene que salir idéntico."""
+        self.liquidar()
+        wb = load_workbook(io.BytesIO(
+            self.get('/api/liquidaciones/excel/').content))
+        ws = wb['MANO DE OBRA']
+        fila = [f for f in range(7, 113)
+                if str(ws[f'A{f}'].value or '').strip() == '*094395'][0]
+        self.assertEqual(ws[f'F{fila}'].value, 1)
+        self.assertIsNone(ws[f'G{fila}'].value)
+
+    def test_cada_poste_tiene_su_columna_en_mano_de_obra(self):
+        tipo, otro = self.sst_de_reforma()
+        self.liquidar_poste(tipo, self.poste, self.inspeccion, 1)
+        self.liquidar_poste(tipo, otro, self.inspeccion, 2)
+        wb = load_workbook(io.BytesIO(
+            self.get('/api/liquidaciones/excel/').content))
+        ws = wb['MANO DE OBRA']
+        fila = [f for f in range(7, 113)
+                if str(ws[f'A{f}'].value or '').strip() == '*094395'][0]
+        self.assertEqual(ws[f'F{fila}'].value, 1)
+        self.assertEqual(ws[f'G{fila}'].value, 2)
+
+    def test_cada_poste_tiene_su_columna_en_material(self):
+        tipo, otro = self.sst_de_reforma()
+        self.liquidar_poste(tipo, self.poste, self.inspeccion, 1,
+                            material=self.poste_prfv, cantidad_material=1)
+        self.liquidar_poste(tipo, otro, self.inspeccion, 1,
+                            material=self.poste_prfv, cantidad_material=3)
+        wb = load_workbook(io.BytesIO(
+            self.get('/api/liquidaciones/excel/').content))
+        ws = wb['MATERIAL']
+        fila = [f for f in range(14, 171)
+                if str(ws[f'A{f}'].value or '').strip() == '5331616'][0]
+        self.assertEqual(ws[f'AV{fila}'].value, 1)
+        self.assertEqual(ws[f'AW{fila}'].value, 3)
+
+    def test_la_suma_de_las_columnas_es_el_total(self):
+        tipo, otro = self.sst_de_reforma()
+        self.liquidar_poste(tipo, self.poste, self.inspeccion, 1)
+        self.liquidar_poste(tipo, otro, self.inspeccion, 2)
+        wb = load_workbook(io.BytesIO(
+            self.get('/api/liquidaciones/excel/').content))
+        ws = wb['MANO DE OBRA']
+        fila = [f for f in range(7, 113)
+                if str(ws[f'A{f}'].value or '').strip() == '*094395'][0]
+        # La plantilla suma F:H en I; aquí se comprueba lo que se escribió.
+        escrito = [ws[f'{c}{fila}'].value or 0 for c in 'FGH']
+        self.assertEqual(sum(escrito), 3)
+
+    def test_un_poste_que_no_liquido_esa_partida_deja_su_columna_vacia(self):
+        tipo, otro = self.sst_de_reforma()
+        self.liquidar_poste(tipo, self.poste, self.inspeccion, 1)
+        self.liquidar_poste(tipo, otro, self.nueva, 5)
+        wb = load_workbook(io.BytesIO(
+            self.get('/api/liquidaciones/excel/').content))
+        ws = wb['MANO DE OBRA']
+        fila = [f for f in range(7, 113)
+                if str(ws[f'A{f}'].value or '').strip() == '*094395'][0]
+        self.assertEqual(ws[f'F{fila}'].value, 1)
+        self.assertIsNone(ws[f'G{fila}'].value)
+
     # ── Hoja Traslado - Acarreo ─────────────────────────────────────────────
 
     def plano_con_arrastre(self, *metros):
