@@ -11,7 +11,9 @@ from decimal import Decimal
 
 from openpyxl import load_workbook
 
-from ..cuaderno_obra import Item, Liquidado, lineas_del_cuaderno
+from ..cuaderno_obra import (
+    PARTIDAS_RETIRO_POSTE, Item, Liquidado, lineas_del_cuaderno,
+)
 from ..models import (
     Actividad, ActividadTipoTrabajo, ConsumoMaterialSuministro, CuadernoObra,
     LiquidacionPartida,
@@ -301,16 +303,22 @@ class LineasDelCuadernoTests(BaseAPITestCase):
 
     # ── Los postes que salieron ─────────────────────────────────────────────
 
-    def test_poner_un_poste_significa_que_salio_el_viejo(self):
+    def test_poner_un_poste_ya_no_significa_que_salio_el_viejo(self):
+        """Antes bastaba con haber consumido un poste del catálogo. En una
+        reforma se instala poste sin retirar el que estaba, así que el retiro
+        pasó a decirlo solo su partida."""
         d = Liquidado(materiales=[item('POSTE', codigo='5331616')],
                       postes=['900000123'])
-        self.assertIn('Se retiró poste 900000123', lineas_del_cuaderno(d))
+        self.assertFalse(any('Se retiró poste' in l for l in lineas_del_cuaderno(d)))
 
-    def test_un_retiro_sin_poste_nuevo_tambien_se_escribe(self):
-        d = Liquidado(partidas=[partida('*090468')], postes=['900000123'])
-        self.assertIn('Se retiró poste 900000123', lineas_del_cuaderno(d))
+    def test_el_retiro_lo_dice_su_partida(self):
+        for codigo in PARTIDAS_RETIRO_POSTE:
+            with self.subTest(codigo):
+                d = Liquidado(partidas=[partida(codigo)], postes=['900000123'])
+                self.assertIn('Se retiró poste 900000123',
+                              lineas_del_cuaderno(d))
 
-    def test_sin_poste_ni_retiro_no_se_escribe(self):
+    def test_sin_partida_de_retiro_no_se_escribe(self):
         d = Liquidado(postes=['900000123'])
         self.assertFalse(any('Se retiró poste' in l for l in lineas_del_cuaderno(d)))
 
@@ -445,12 +453,23 @@ class LineasDelCuadernoTests(BaseAPITestCase):
 
     def test_el_retiro_del_poste_va_en_su_bloque(self):
         d = Liquidado(por_poste=[
-            poste_liquidado('771000100', materiales=[item('POSTE', codigo='5331616')]),
-            poste_liquidado('771000101', materiales=[item('POSTE', codigo='5331596')]),
+            poste_liquidado('771000100', partidas=[partida('*090470')]),
+            poste_liquidado('771000101', partidas=[partida('*090471')]),
         ])
         lineas = lineas_del_cuaderno(d)
         self.assertIn('Se retiró poste 771000100', lineas)
         self.assertIn('Se retiró poste 771000101', lineas)
+
+    def test_solo_se_nombra_el_poste_que_de_verdad_salio(self):
+        """El caso que reportó el usuario: en una reforma el cuaderno decía
+        "Se retiró poste Poste 01" en puntos donde no se retiró nada."""
+        d = Liquidado(por_poste=[
+            poste_liquidado('Poste 01', partidas=[partida('*098670')]),
+            poste_liquidado('Poste 02', partidas=[partida('*090470')]),
+            poste_liquidado('Poste 03', materiales=[item('POSTE', codigo='5331616')]),
+        ])
+        retiros = [l for l in lineas_del_cuaderno(d) if 'Se retiró poste' in l]
+        self.assertEqual(retiros, ['Se retiró poste Poste 02'])
 
     # ── El orden de la obra ─────────────────────────────────────────────────
 
