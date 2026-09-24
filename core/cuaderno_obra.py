@@ -26,8 +26,10 @@ CLIENTE = 'TECSUR'
 TEC_TECSUR = 'Eduardo Rabines'
 TEC_LDS = 'Patrick Miranda'
 
-# Partidas que dicen que se quitó el poste aunque no se haya puesto otro.
-PARTIDAS_RETIRO_POSTE = ('*090468', '*090497', '*090491')
+# Las únicas partidas que dicen que el poste salió. Poner uno nuevo no basta:
+# en una reforma se instala poste sin retirar el que estaba.
+PARTIDAS_RETIRO_POSTE = ('*090228', '*090468', '*090470', '*090471',
+                         '*090491', '*090497')
 TRASLADO_PASTORAL = '*091356'
 TRASLADO_LUMINARIA = '*091322'
 CONEXIONES_TRASLADADAS = '*093081'
@@ -311,11 +313,9 @@ def _poste(d, lineas):
 
 
 def _postes_retirados(d, lineas):
-    """Los postes de la SST que salieron. Se sabe porque se puso uno nuevo o
-    porque se liquidó un retiro, que no siempre trae poste nuevo detrás."""
-    hay_nuevo = any(m.codigo in POSTES or normalizar(m.descripcion).startswith('poste')
-                    for m in d.materiales)
-    if not hay_nuevo and not any(d.partida(p) > 0 for p in PARTIDAS_RETIRO_POSTE):
+    """Los postes de la SST que salieron. Lo dice su partida de retiro y nada
+    más: instalar un poste nuevo no significa que el viejo se haya ido."""
+    if not any(d.partida(p) > 0 for p in PARTIDAS_RETIRO_POSTE):
         return
     for numero_poste in d.postes:
         lineas.append(f'Se retiró poste {numero_poste}')
