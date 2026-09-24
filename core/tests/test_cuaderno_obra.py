@@ -16,7 +16,8 @@ from ..cuaderno_obra import (
     PARTIDAS_RETIRO_POSTE, Item, Liquidado, lineas_del_cuaderno,
 )
 from ..excel_liquidacion import (
-    _columna_con, _columnas_de_postes, _rotular_postes,
+    MO_ENCABEZADO, MO_POSTES, PLANTILLA, _columna_con, _columnas_de_postes,
+    _rotular_postes,
 )
 from ..models import (
     Actividad, ActividadTipoTrabajo, ConsumoMaterialSuministro, CuadernoObra,
@@ -597,7 +598,17 @@ class DescargasTests(BaseAPITestCase):
         self.assertEqual(mo[f'F{fila_insp}'].value, 1)
         fila_nueva = next(f for f in range(7, 113) if mo[f'A{f}'].value == '*777777')
         self.assertEqual(mo[f'F{fila_nueva}'].value, 3)
-        self.assertEqual(mo[f'I{fila_nueva}'].value, f'=SUM(F{fila_nueva}:H{fila_nueva})')
+        # La fila nueva se suma sola. En qué columna cae y hasta dónde llega
+        # lo manda la plantilla: si se le insertan columnas de postes, la
+        # suma se corre y se estira con ellas.
+        # Se leen de la plantilla y no del archivo generado: ahí los P1, P2...
+        # ya fueron reemplazados por el número de cada poste.
+        molde = load_workbook(PLANTILLA)['MANO DE OBRA']
+        postes = _columnas_de_postes(molde, MO_ENCABEZADO, MO_POSTES[0])
+        suma = _columna_con(molde, MO_ENCABEZADO, 'Cant.')
+        self.assertEqual(
+            mo[f'{suma}{fila_nueva}'].value,
+            f'=SUM({postes[0]}{fila_nueva}:{postes[-1]}{fila_nueva})')
 
     def test_excel_cables_hasta_35_y_veredas_del_plano(self):
         self.liquidar()
