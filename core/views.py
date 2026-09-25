@@ -2032,6 +2032,7 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
 
         sst, datos = self._sst_liquidada(request)
         codigo = sst.codigo or sst.sst
+        por_poste = partidas_cobradas_por_poste(sst)
         # La mano de obra va con lo que se COBRA, no con lo que se liquidó: el
         # paquete de cambio de poste ya incluye parte de ese trabajo y no se
         # cobra dos veces. Es la misma columna que muestra el consolidado.
@@ -2045,8 +2046,11 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
         }, datos.materiales, partidas_cobradas(sst), datos.elementos_plano,
             materiales_por_poste=[p.materiales for p in datos.por_poste],
             partidas_por_poste=[
-                partidas for _numero, partidas in partidas_cobradas_por_poste(sst)
-            ])
+                partidas for _numero, partidas in por_poste
+            ],
+            # Los dos van en el orden en que se grabaron los postes, que es el
+            # orden de las columnas del Excel.
+            postes=[numero for numero, _partidas in por_poste])
         resp = HttpResponse(
             contenido,
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

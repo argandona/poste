@@ -9,10 +9,15 @@ import io
 from datetime import date, time
 from decimal import Decimal
 
-from openpyxl import load_workbook
+from django.test import SimpleTestCase
+from openpyxl import Workbook, load_workbook
 
 from ..cuaderno_obra import (
     PARTIDAS_RETIRO_POSTE, Item, Liquidado, lineas_del_cuaderno,
+)
+from ..excel_liquidacion import (
+    MO_ENCABEZADO, MO_POSTES, PLANTILLA, _columna_con, _columnas_de_postes,
+    _rotular_postes,
 )
 from ..models import (
     Actividad, ActividadTipoTrabajo, ConsumoMaterialSuministro, CuadernoObra,
@@ -593,7 +598,17 @@ class DescargasTests(BaseAPITestCase):
         self.assertEqual(mo[f'F{fila_insp}'].value, 1)
         fila_nueva = next(f for f in range(7, 113) if mo[f'A{f}'].value == '*777777')
         self.assertEqual(mo[f'F{fila_nueva}'].value, 3)
-        self.assertEqual(mo[f'I{fila_nueva}'].value, f'=SUM(F{fila_nueva}:H{fila_nueva})')
+        # La fila nueva se suma sola. En qué columna cae y hasta dónde llega
+        # lo manda la plantilla: si se le insertan columnas de postes, la
+        # suma se corre y se estira con ellas.
+        # Se leen de la plantilla y no del archivo generado: ahí los P1, P2...
+        # ya fueron reemplazados por el número de cada poste.
+        molde = load_workbook(PLANTILLA)['MANO DE OBRA']
+        postes = _columnas_de_postes(molde, MO_ENCABEZADO, MO_POSTES[0])
+        suma = _columna_con(molde, MO_ENCABEZADO, 'Cant.')
+        self.assertEqual(
+            mo[f'{suma}{fila_nueva}'].value,
+            f'=SUM({postes[0]}{fila_nueva}:{postes[-1]}{fila_nueva})')
 
     def test_excel_cables_hasta_35_y_veredas_del_plano(self):
         self.liquidar()
@@ -723,6 +738,35 @@ class DescargasTests(BaseAPITestCase):
                 if str(ws[f'A{f}'].value or '').strip() == '*094395'][0]
         self.assertEqual(ws[f'F{fila}'].value, 1)
         self.assertIsNone(ws[f'G{fila}'].value)
+
+    def test_las_columnas_llevan_el_numero_de_cada_poste(self):
+        """Los P1, P2, P3 de la plantilla dicen qué poste es cada columna."""
+        from ..excel_liquidacion import MAT_ENCABEZADO, MO_ENCABEZADO
+        tipo, otro = self.sst_de_reforma()
+        self.liquidar_poste(tipo, self.poste, self.inspeccion, 1)
+        self.liquidar_poste(tipo, otro, self.inspeccion, 2)
+        wb = load_workbook(io.BytesIO(
+            self.get('/api/liquidaciones/excel/').content))
+        mat, mo = wb['MATERIAL'], wb['MANO DE OBRA']
+        self.assertEqual(mat[f'AV{MAT_ENCABEZADO}'].value,
+                         self.poste.numero_suministro)
+        self.assertEqual(mat[f'AW{MAT_ENCABEZADO}'].value, 'P-7789')
+        self.assertEqual(mo[f'F{MO_ENCABEZADO}'].value,
+                         self.poste.numero_suministro)
+        self.assertEqual(mo[f'G{MO_ENCABEZADO}'].value, 'P-7789')
+
+    def test_el_orden_de_las_columnas_es_el_de_grabado(self):
+        """El usuario las quiere en el orden en que se graban los postes."""
+        from ..excel_liquidacion import MO_ENCABEZADO
+        tipo, otro = self.sst_de_reforma()
+        self.liquidar_poste(tipo, otro, self.inspeccion, 2)
+        self.liquidar_poste(tipo, self.poste, self.inspeccion, 1)
+        wb = load_workbook(io.BytesIO(
+            self.get('/api/liquidaciones/excel/').content))
+        ws = wb['MANO DE OBRA']
+        self.assertEqual(ws[f'F{MO_ENCABEZADO}'].value, 'P-7789')
+        self.assertEqual(ws[f'G{MO_ENCABEZADO}'].value,
+                         self.poste.numero_suministro)
 
     # ── Hoja Traslado - Acarreo ─────────────────────────────────────────────
 
@@ -932,3 +976,61 @@ class DescargasTests(BaseAPITestCase):
         self.assertEqual(r.status_code, 201, r.data)
         self.assertEqual(LiquidacionSuministro.objects.get(pk=r.data['id_liquidacion'])
                          .comentario, '1234567')
+
+
+class ColumnasDePostesTests(SimpleTestCase):
+    """Cuántas columnas de postes hay lo dice la plantilla, no el código.
+
+    Así, cuando se le insertan columnas en Excel y se rotulan P4, P5..., el
+    Excel las usa sin que haya que tocar nada aquí."""
+
+    def hoja(self, encabezados):
+        """Una hoja suelta con un encabezado como el de la plantilla."""
+        wb = Workbook()
+        ws = wb.active
+        for columna, valor in encabezados.items():
+            ws[f'{columna}1'] = valor
+        return ws
+
+    def test_las_encuentra_desde_la_primera(self):
+        ws = self.hoja({'E': 'S/,', 'F': 'P1', 'G': 'P2', 'H': 'P3',
+                        'I': 'Cant.'})
+        self.assertEqual(_columnas_de_postes(ws, 1, 'F'), ('F', 'G', 'H'))
+
+    def test_si_la_plantilla_trae_mas_las_usa_todas(self):
+        ws = self.hoja({'F': 'P1', 'G': 'P2', 'H': 'P3', 'I': 'P4',
+                        'J': 'P5', 'K': 'P6', 'L': 'Cant.'})
+        self.assertEqual(_columnas_de_postes(ws, 1, 'F'),
+                         ('F', 'G', 'H', 'I', 'J', 'K'))
+
+    def test_se_corta_donde_deja_de_decir_P(self):
+        ws = self.hoja({'F': 'P1', 'G': 'P2', 'H': 'Cant.', 'I': 'P3'})
+        self.assertEqual(_columnas_de_postes(ws, 1, 'F'), ('F', 'G'))
+
+    def test_sin_rotulos_queda_la_primera(self):
+        self.assertEqual(_columnas_de_postes(self.hoja({}), 1, 'F'), ('F',))
+
+    def test_las_columnas_de_la_derecha_se_buscan_por_su_rotulo(self):
+        """Insertar columnas de postes corre Cant., Cant. Final y Total Final."""
+        ws = self.hoja({'F': 'P1', 'G': 'P2', 'H': 'P3', 'I': 'P4',
+                        'J': 'Cant.', 'K': 'AP/SUBT.', 'M': 'Cant. Final',
+                        'N': 'Total Final'})
+        self.assertEqual(_columna_con(ws, 1, 'Cant.'), 'J')
+        self.assertEqual(_columna_con(ws, 1, 'Cant. Final'), 'M')
+        self.assertEqual(_columna_con(ws, 1, 'Total Final'), 'N')
+        self.assertIsNone(_columna_con(ws, 1, 'No existe'))
+
+    def test_con_mas_postes_que_columnas_la_ultima_los_nombra_a_todos(self):
+        """La última columna se lleva las cantidades de los que sobran, así que
+        tiene que decir de quiénes es."""
+        ws = self.hoja({'F': 'P1', 'G': 'P2', 'H': 'P3'})
+        _rotular_postes(ws, 1, ('F', 'G', 'H'),
+                        ['771000100', '771000101', '771000102', '771000103'])
+        self.assertEqual(ws['F1'].value, '771000100')
+        self.assertEqual(ws['G1'].value, '771000101')
+        self.assertEqual(ws['H1'].value, '771000102 + 771000103')
+
+    def test_sin_postes_la_plantilla_queda_como_viene(self):
+        ws = self.hoja({'F': 'P1', 'G': 'P2'})
+        _rotular_postes(ws, 1, ('F', 'G'), [])
+        self.assertEqual(ws['F1'].value, 'P1')
