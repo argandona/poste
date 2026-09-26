@@ -265,7 +265,11 @@ class SSTEncargado(models.Model):
 class Suministro(models.Model):
     ESTADO_CHOICES = [("asignado", "Asignado"), ("ejecutado", "Ejecutado"), ("devuelto", "Devuelto")]
     id_suministro     = models.AutoField(primary_key=True)
-    numero_suministro = models.CharField(max_length=20, unique=True, db_index=True)
+    # Único DENTRO de su SST, no en toda la base: "Poste 01" es una etiqueta
+    # que se repite en cada reforma, y un poste real puede trabajarse en dos
+    # SST distintas. Lo cuidan `agregar_punto` y `renombrar_punto`, que es
+    # donde se escribe: la regla cruza dos tablas y no cabe en un constraint.
+    numero_suministro = models.CharField(max_length=20, db_index=True)
     medidor           = models.CharField(max_length=20, blank=True)
     distrito          = models.CharField(max_length=100, blank=True)
     monto_sum         = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"), validators=[MinValueValidator(0)])

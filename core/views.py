@@ -436,26 +436,20 @@ class SSTViewSet(viewsets.ModelViewSet):
         if actor is None:
             return Response({'detail': 'Usuario no encontrado.'}, status=400)
 
-        suministro = Suministro.objects.filter(numero_suministro=numero).first()
-        if suministro is not None:
-            rel = (SSTSuministro.objects
-                   .select_related('sst')
-                   .filter(suministro=suministro).first())
-            if rel is not None:
-                if rel.sst_id == sst.id_sst:
-                    return Response(
-                        {'detail': f'El poste {numero} ya está en esta SST.'},
-                        status=400)
-                otra = rel.sst.codigo or rel.sst.sst
-                return Response(
-                    {'detail': f'El poste {numero} ya pertenece a la SST {otra}.'},
-                    status=400)
-        else:
-            # Un poste suelto se reaprovecha; si no existe, nace aquí.
-            suministro = Suministro.objects.create(
-                numero_suministro=numero,
-                distrito=sst.distrito or '',
-                estado='asignado')
+        # El número solo tiene que ser único DENTRO de su SST: "Poste 01" es una
+        # etiqueta que el capataz repite en cada reforma, y un poste real puede
+        # trabajarse en dos SST distintas.
+        if SSTSuministro.objects.filter(
+                sst=sst, suministro__numero_suministro=numero).exists():
+            return Response(
+                {'detail': f'El poste {numero} ya está en esta SST.'}, status=400)
+        # Cada SST tiene su propio registro del poste, aunque el número se
+        # repita: si compartieran uno, las liquidaciones de una SST saldrían en
+        # el cuaderno y el Excel de la otra.
+        suministro = Suministro.objects.create(
+            numero_suministro=numero,
+            distrito=sst.distrito or '',
+            estado='asignado')
 
         ultimo = (SSTSuministro.objects.filter(sst=sst)
                   .order_by('-orden').values_list('orden', flat=True).first())
@@ -532,13 +526,12 @@ class SSTViewSet(viewsets.ModelViewSet):
         sst, rel, error = self._punto_de(request, solo_por_id=True)
         if error:
             return error
-        otro = (Suministro.objects
-                .filter(numero_suministro=nuevo)
-                .exclude(pk=rel.suministro_id).first())
-        if otro is not None:
+        choca = (SSTSuministro.objects
+                 .filter(sst=sst, suministro__numero_suministro=nuevo)
+                 .exclude(suministro_id=rel.suministro_id).exists())
+        if choca:
             return Response(
-                {'detail': f'El poste {nuevo} ya existe en el sistema.'},
-                status=400)
+                {'detail': f'El poste {nuevo} ya está en esta SST.'}, status=400)
         anterior = rel.suministro.numero_suministro
         rel.suministro.numero_suministro = nuevo
         rel.suministro.save(update_fields=['numero_suministro'])
@@ -829,10 +822,15 @@ class SSTViewSet(viewsets.ModelViewSet):
                 empresa_id=actor.empresa_id, codigo=sst_codigo,
                 defaults={'distrito': distrito},
             )
-            sum_obj, sum_nuevo = Suministro.objects.get_or_create(
-                numero_suministro=numero,
-                defaults={'distrito': distrito or sst.distrito, 'estado': 'asignado'},
-            )
+            # Dentro de esta SST, no en toda la base: el mismo número puede
+            # estar en otra SST y ahí es otro registro.
+            sum_obj = Suministro.objects.filter(
+                numero_suministro=numero, sst_suministros__sst=sst).first()
+            sum_nuevo = sum_obj is None
+            if sum_nuevo:
+                sum_obj = Suministro.objects.create(
+                    numero_suministro=numero,
+                    distrito=distrito or sst.distrito, estado='asignado')
             SSTSuministro.objects.update_or_create(
                 sst=sst, suministro=sum_obj,
                 defaults={'asignado_a': capataz},
