@@ -96,23 +96,55 @@ class PuntoDeTrabajoTests(BaseAPITestCase):
         self.assertEqual(r.status_code, 400)
         self.assertIn("ya está en esta SST", r.data["detail"])
 
-    def test_un_poste_de_otra_sst_avisa_de_cual(self):
+    def test_el_mismo_numero_en_otra_sst_ahora_si_se_puede(self):
+        """Antes esto avisaba "ya pertenece a la SST tal".
+
+        El capataz numera los puntos de cada reforma como Poste 01, Poste 02:
+        son etiquetas que se repiten en toda SST. El número solo tiene que ser
+        único dentro de la suya."""
         otra = SST.objects.create(
             sst="9999", codigo="SST-9999", empresa=self.empresa,
             distrito="LIMA", actividad=self.reforma)
-        poste = Suministro.objects.create(numero_suministro="771000100")
+        poste = Suministro.objects.create(numero_suministro="Poste 01")
         SSTSuministro.objects.create(sst=otra, suministro=poste)
-        r = self.agregar("771000100")
-        self.assertEqual(r.status_code, 400)
-        self.assertIn("SST-9999", r.data["detail"])
+        r = self.agregar("Poste 01")
+        self.assertEqual(r.status_code, 201, r.data)
 
-    def test_un_poste_suelto_se_reaprovecha(self):
-        """Existe en el catálogo pero no está en ninguna SST: se cuelga aquí
-        en vez de fallar por número repetido."""
-        Suministro.objects.create(numero_suministro="771000100")
-        self.assertEqual(self.agregar("771000100").status_code, 201)
+    def test_cada_sst_tiene_su_propio_registro(self):
+        """Si compartieran uno, las liquidaciones de una SST saldrían en el
+        cuaderno y el Excel de la otra."""
+        otra = SST.objects.create(
+            sst="9999", codigo="SST-9999", empresa=self.empresa,
+            distrito="LIMA", actividad=self.reforma)
+        ajeno = Suministro.objects.create(numero_suministro="Poste 01")
+        SSTSuministro.objects.create(sst=otra, suministro=ajeno)
+        r = self.agregar("Poste 01")
+        self.assertNotEqual(r.data["id_suministro"], ajeno.pk)
         self.assertEqual(
-            Suministro.objects.filter(numero_suministro="771000100").count(), 1)
+            Suministro.objects.filter(numero_suministro="Poste 01").count(), 2)
+
+    def test_lo_liquidado_no_se_mezcla_entre_sst(self):
+        from ..cuaderno_obra import reunir
+
+        otra = SST.objects.create(
+            sst="9999", codigo="SST-9999", empresa=self.empresa,
+            distrito="LIMA", actividad=self.reforma)
+        ajeno = Suministro.objects.create(numero_suministro="Poste 01")
+        SSTSuministro.objects.create(sst=otra, suministro=ajeno)
+        LiquidacionSuministro.objects.create(
+            suministro=ajeno, sst_externo=otra.codigo, usuario=self.capataz,
+            tipo_trabajo=TipoTrabajo.objects.create(nombre="Poste cabria"))
+        self.agregar("Poste 01")
+        # La SST nueva tiene su Poste 01, pero vacío: lo liquidado es de la otra.
+        self.assertEqual(reunir(self.sst).por_poste, [])
+        self.assertEqual(len(reunir(otra).por_poste), 1)
+
+    def test_el_mismo_numero_dos_veces_en_la_misma_sst_sigue_avisando(self):
+        self.agregar("Poste 01")
+        r = self.agregar("Poste 01")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("ya está en esta SST", r.data["detail"])
+
 
     def test_faltando_datos_no_hace_nada(self):
         self.auth(self.capataz)
@@ -244,7 +276,7 @@ class EditarPuntosTests(BaseAPITestCase):
             "numero_suministro": "771000101",
         }, format="json")
         self.assertEqual(r.status_code, 400)
-        self.assertIn("ya existe", r.data["detail"])
+        self.assertIn("ya está en esta SST", r.data["detail"])
 
     # ── Mover ───────────────────────────────────────────────────────────────
 
