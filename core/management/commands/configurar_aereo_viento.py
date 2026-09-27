@@ -7,7 +7,8 @@ llevarse por delante lo que se armó ahí.
 La excepción es "Retiros - otros - viento", que va siempre. Es el mismo
 trabajo que "Retiros - otros - cabria": las mismas partidas, con el catálogo
 que define `configurar_cabria`, así que si se corrige allá se corrige aquí en
-el siguiente despliegue. Las reglas que lo llenan están en la app.
+el siguiente despliegue. Encima lleva las de `PARTIDAS_PROPIAS`, que en cabria
+no se retiran. Las reglas que lo llenan están en la app.
 
 Lo otro que fija es que su SST lleve **varios postes**, que el capataz va
 agregando en obra.
@@ -33,6 +34,20 @@ RETIROS_DE_CABRIA = "Retiros - otros - cabria"
 # orden 0, así que este número los deja siempre antes.
 ORDEN_DE_LOS_RETIROS = 100
 
+# Lo que viento retira y cabria no, con su cantidad inicial. Van después de
+# las de cabria.
+PARTIDAS_PROPIAS = {
+    "*090468": 0,  # retiro de poste PRFV hasta 8.7 m <- poste de fibra (REC-051)
+}
+
+
+def catalogo_de_los_retiros():
+    de_cabria = CATALOGO[RETIROS_DE_CABRIA]
+    return {
+        "materiales": dict(de_cabria["materiales"]),
+        "mano_de_obra": {**de_cabria["mano_de_obra"], **PARTIDAS_PROPIAS},
+    }
+
 
 class Command(BaseCommand):
     help = (f'Crea la actividad «{NOMBRE}», con varios postes por SST y '
@@ -53,7 +68,7 @@ class Command(BaseCommand):
         if creado:
             self.stdout.write(f"  Tipo de trabajo creado: «{RETIROS}».")
         ConfigurarCabria(stdout=self.stdout, stderr=self.stderr)._catalogo(
-            retiros, CATALOGO[RETIROS_DE_CABRIA])
+            retiros, catalogo_de_los_retiros())
         _, vinculado = ActividadTipoTrabajo.objects.update_or_create(
             actividad=actividad, tipo_trabajo=retiros,
             defaults={'orden': ORDEN_DE_LOS_RETIROS})

@@ -27,3 +27,9 @@ class CargarRecuperosTests(BaseAPITestCase):
             set(Recupero.objects.filter(matricula__in=caais)
                 .values_list("unidad", flat=True)),
             {"M"})
+
+    def test_el_poste_de_fibra_entra_por_unidad(self):
+        call_command("cargar_recuperos", verbosity=0)
+        poste = Recupero.objects.get(matricula="REC-051")
+        self.assertEqual(poste.descripcion, "POSTE DE FIBRA")
+        self.assertEqual(poste.unidad, "UND")
