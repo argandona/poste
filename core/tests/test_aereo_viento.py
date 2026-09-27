@@ -19,13 +19,15 @@ from .base import BaseAPITestCase
 NOMBRE = "Cambio de poste inaccesible aereo - Viento"
 RETIROS = "Retiros - otros - viento"
 PARTIDAS_DE_CABRIA = list(CATALOGO["Retiros - otros - cabria"]["mano_de_obra"])
+# El retiro del poste de fibra: viento lo retira y cabria no.
+PARTIDAS_DE_VIENTO = PARTIDAS_DE_CABRIA + ["*090468"]
 
 
 class AereoVientoTests(BaseAPITestCase):
 
     def setUp(self):
         super().setUp()
-        for partida in PARTIDAS_DE_CABRIA:
+        for partida in PARTIDAS_DE_VIENTO:
             ManoDeObra.objects.get_or_create(
                 partida=partida,
                 defaults={"descripcion": partida, "precio": Decimal("1.00")})
@@ -45,14 +47,17 @@ class AereoVientoTests(BaseAPITestCase):
         self.assertTrue(self.actividad().varios_postes)
         self.assertEqual(self.tipos(), [RETIROS])
 
-    def test_los_retiros_llevan_las_mismas_partidas_que_los_de_cabria(self):
+    def test_los_retiros_llevan_las_de_cabria_y_el_poste_de_fibra(self):
         self.configurar()
         retiros = TipoTrabajo.objects.get(nombre=RETIROS)
         partidas = list(TipoTrabajoManoDeObra.objects
                         .filter(tipo_trabajo=retiros)
                         .order_by("orden")
                         .values_list("mano_de_obra__partida", flat=True))
-        self.assertEqual(partidas, PARTIDAS_DE_CABRIA)
+        self.assertEqual(partidas, PARTIDAS_DE_VIENTO)
+
+    def test_el_poste_de_fibra_no_se_cuela_en_los_retiros_de_cabria(self):
+        self.assertNotIn("*090468", PARTIDAS_DE_CABRIA)
 
     def test_correrlo_dos_veces_no_duplica_nada(self):
         self.configurar()
