@@ -142,6 +142,24 @@ def qs_empresa(qs, request, campo='empresa'):
     return qs
 
 
+def solo_propios(qs, request, puede_aprobar):
+    """Pedidos o devoluciones que le tocan a quien consulta.
+
+    Quien los hace ve solo los suyos. Quien los aprueba los ve todos, aunque
+    además tenga rol de capataz: si no, su bandeja de pendientes le mostraría
+    solo lo que él mismo pidió. Con ?propios=1 cualquiera ve solo los suyos,
+    que es lo que pide la pantalla de "mis pedidos".
+    """
+    try:
+        usr = Usuario.objects.get(pk=request.user.id_usuario)
+    except (AttributeError, Usuario.DoesNotExist):
+        return qs
+    propios = request.query_params.get('propios') in ('1', 'true')
+    if propios or (usr.puede_hacer_pedido() and not getattr(usr, puede_aprobar)()):
+        return qs.filter(usuario_id=usr.pk)
+    return qs
+
+
 # ── Empresa ─────────────────────────────────────────────────────────────────
 class EmpresaViewSet(viewsets.ModelViewSet):
     serializer_class   = EmpresaSerializer
@@ -1158,13 +1176,7 @@ class PedidoViewSet(viewsets.ModelViewSet):
         camion = self.request.query_params.get('camion')
         if camion:
             qs = qs.filter(camion_id=camion)
-        try:
-            usr = Usuario.objects.get(pk=self.request.user.id_usuario)
-            if usr.puede_hacer_pedido():
-                qs = qs.filter(usuario_id=usr.pk)
-        except (AttributeError, Usuario.DoesNotExist):
-            pass
-        return qs
+        return solo_propios(qs, self.request, 'puede_aprobar_pedido')
 
     @action(detail=True, methods=['post'])
     def aprobar(self, request, pk=None):
@@ -1267,13 +1279,7 @@ class DevolucionViewSet(viewsets.ModelViewSet):
         estado = self.request.query_params.get('estado')
         if estado:
             qs = qs.filter(estado=estado)
-        try:
-            usr = Usuario.objects.get(pk=self.request.user.id_usuario)
-            if usr.puede_hacer_pedido():
-                qs = qs.filter(usuario_id=usr.pk)
-        except (AttributeError, Usuario.DoesNotExist):
-            pass
-        return qs
+        return solo_propios(qs, self.request, 'puede_aprobar_devolucion')
 
     @action(detail=True, methods=['post'])
     def aprobar(self, request, pk=None):
