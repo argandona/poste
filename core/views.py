@@ -39,7 +39,7 @@ class CatalogoPagination(PageNumberPagination):
     max_page_size = 2000
 
 from .models import (
-    ActividadTipoTrabajo, Actividad,
+    ActividadTipoTrabajo, Actividad, actividades_para,
     Empresa, Rol, Usuario, Camion, UsuarioCamion, TraspasoCamion, SST,
     Material, StockCamion, Almacen, StockAlmacen, Proveedor,
     IngresoTecsur, DevolucionTecsur, MaterialMalogrado, TransferenciaAlmacen,
@@ -703,6 +703,10 @@ class SSTViewSet(viewsets.ModelViewSet):
             capataz = Usuario.objects.get(pk=usuario_id)
         except Usuario.DoesNotExist:
             return Response({'detail': 'Usuario no encontrado.'}, status=404)
+        if sst.actividad_id and not actividades_para(capataz).filter(
+                pk=sst.actividad_id).exists():
+            return Response({'detail': f'La actividad de la SST no es para '
+                                       f'{capataz.nombre}.'}, status=400)
         with transaction.atomic():
             SSTEncargado.objects.get_or_create(sst=sst, usuario=capataz)
             qs = SSTSuministro.objects.filter(sst=sst)
@@ -741,6 +745,10 @@ class SSTViewSet(viewsets.ModelViewSet):
         actividad_id = request.data.get('actividad')
         if not sst_codigo or not actividad_id:
             return Response({'detail': 'sst_codigo y actividad son obligatorios.'}, status=400)
+        actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
+        if not actividades_para(actor).filter(pk=actividad_id).exists():
+            return Response({'detail': 'Esa actividad no está habilitada '
+                                       'para tu rol.'}, status=400)
         empresa_id = getattr(request.user, 'empresa_id', None)
         qs = SST.objects.filter(codigo=sst_codigo)
         if empresa_id:
@@ -816,6 +824,16 @@ class SSTViewSet(viewsets.ModelViewSet):
             capataz = Usuario.objects.get(pk=usuario_id)
         except Usuario.DoesNotExist:
             return Response({'detail': 'Capataz no encontrado.'}, status=404)
+        # Se le asigna obra a quien la ejecuta: un capataz o un encargado.
+        if not (capataz.roles & {Rol.CAPATAZ, Rol.ENCARGADO}):
+            return Response({'detail': 'Solo se asigna a un capataz o a un '
+                                       'encargado.'}, status=400)
+        if actividad_id and not actividades_para(capataz).filter(
+                pk=actividad_id).exists():
+            return Response({'detail': f'Esa actividad no es para '
+                                       f'{capataz.nombre}: el encargado lleva '
+                                       'las de encargado y el capataz las '
+                                       'demás.'}, status=400)
 
         with transaction.atomic():
             sst, sst_nuevo = SST.objects.get_or_create(
@@ -1816,7 +1834,8 @@ class RecuperoViewSet(viewsets.ModelViewSet):
 
         actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
         capataz = (Usuario.objects
-                   .filter(con_rol(Rol.CAPATAZ), sst_encargados__sst=sst)
+                   .filter(con_rol(Rol.CAPATAZ, Rol.ENCARGADO),
+                           sst_encargados__sst=sst)
                    .select_related('rol').first())
         if capataz is None:
             capataz = (Usuario.objects
@@ -2406,8 +2425,20 @@ def _solo_coordinador(request):
 
 class ActividadViewSet(viewsets.ModelViewSet):
     serializer_class   = ActividadSerializer
-    queryset           = Actividad.objects.all().order_by('nombre')
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        """Las actividades que ve quien pregunta: el encargado las suyas y el
+        capataz las demás. Con ?para_usuario=<id>, quien asigna pide las que
+        puede recibir ese usuario."""
+        actor = Usuario.objects.filter(
+            pk=getattr(self.request.user, 'id_usuario', None)).first()
+        para = self.request.query_params.get('para_usuario')
+        if para and actor and actor.puede_asignar_sst():
+            destino = Usuario.objects.filter(pk=para).first()
+            if destino is not None:
+                return actividades_para(destino).order_by('nombre')
+        return actividades_para(actor).order_by('nombre')
 
     def create(self, request, *args, **kwargs):
         if not _solo_coordinador(request):

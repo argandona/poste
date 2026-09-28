@@ -24,3 +24,5 @@ python manage.py configurar_reforma_cabria
 python manage.py configurar_aereo_viento
 # Qué se cobra una vez por SST: lo que sale del plano.
 python manage.py configurar_partidas_de_sst
+# Reforzamiento de poste: las dos actividades de los encargados.
+python manage.py configurar_reforzamiento
