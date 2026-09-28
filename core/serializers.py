@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models
 from rest_framework import serializers
 
@@ -160,11 +162,30 @@ class AlmacenSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class CantidadField(serializers.DecimalField):
+    """Una cantidad que admite decimales, como los metros de fleje.
+
+    Sale como número y no como texto, y entera cuando es exacta: los APK
+    anteriores leen estas cantidades como `int`, y con "4.00" o 4.0 se caían
+    al abrir los pedidos. Así solo un pedido con decimales los afecta."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault('max_digits', 12)
+        kwargs.setdefault('decimal_places', 2)
+        kwargs.setdefault('min_value', Decimal('0'))
+        super().__init__(**kwargs)
+
+    def to_representation(self, value):
+        valor = Decimal(value)
+        return int(valor) if valor == valor.to_integral_value() else float(valor)
+
+
 # ── StockAlmacen ─────────────────────────────────
 class StockAlmacenSerializer(serializers.ModelSerializer):
     almacen_nombre       = serializers.CharField(source='almacen.nombre',       read_only=True)
     material_descripcion = serializers.CharField(source='material.descripcion', read_only=True)
     material_matricula   = serializers.CharField(source='material.matricula',   read_only=True)
+    cantidad             = CantidadField(required=False)
     class Meta:
         model  = StockAlmacen
         fields = '__all__'
@@ -324,6 +345,8 @@ class TransferenciaAlmacenCreateSerializer(serializers.ModelSerializer):
 class DetallePedidoSerializer(serializers.ModelSerializer):
     material_descripcion = serializers.CharField(source='material.descripcion', read_only=True)
     material_matricula   = serializers.CharField(source='material.matricula',   read_only=True)
+    cantidad_solicitada  = CantidadField()
+    cantidad_aprobada    = CantidadField(required=False)
     class Meta:
         model  = DetallePedido
         fields = '__all__'
@@ -366,6 +389,8 @@ class PedidoAprobarSerializer(serializers.Serializer):
 class DetalleDevolucionSerializer(serializers.ModelSerializer):
     material_descripcion = serializers.CharField(source='material.descripcion', read_only=True)
     material_matricula   = serializers.CharField(source='material.matricula',   read_only=True)
+    cantidad_solicitada  = CantidadField()
+    cantidad_aprobada    = CantidadField(required=False)
     class Meta:
         model  = DetalleDevolucion
         fields = '__all__'
