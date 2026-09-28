@@ -357,6 +357,10 @@ class Material(models.Model):
     matricula   = models.CharField(max_length=50, unique=True)
     descripcion = models.CharField(max_length=200)
     precio      = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0)])
+    # Los agregados (el cemento) no se piden: se entregan temprano al que sale
+    # a obra desde su propio módulo, "Asignación de agregados", y se descuentan
+    # según lo que se liquida.
+    es_agregado = models.BooleanField(default=False)
     class Meta:
         db_table = "material"
     def __str__(self):
@@ -826,6 +830,10 @@ class LiquidacionSuministro(models.Model):
     # por ejemplo los suministros de las conexiones trasladadas, que van tal
     # cual al cuaderno de obra.
     comentario          = models.TextField(blank=True)
+    # Lo que se midió para llegar a las cantidades y no cabe en una partida:
+    # los paños de vereda, pista y asfalto con su largo y ancho, o los metros
+    # y viajes del acarreo. La app lo devuelve al reabrir la liquidación.
+    medidas             = models.JSONField(default=dict, blank=True)
     class Meta:
         db_table = "liquidacion_suministro"
     def __str__(self):

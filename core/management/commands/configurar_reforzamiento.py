@@ -1,24 +1,109 @@
-"""Crea las dos actividades de reforzamiento de poste, que son de encargado.
+"""Crea las dos actividades de reforzamiento de poste, que son de encargado,
+el cemento que usan y el tipo de trabajo de la que lleva vereda.
 
 Un encargado solo ve las actividades de encargado, y estas son las suyas; el
-capataz no las ve. Sus tipos de trabajo todavía no están definidos: se cuelgan
-desde la pantalla de Configuración, y el comando no toca esos vínculos.
+capataz no las ve.
+
+El cemento va por bolsa de 42.5 kg y es un agregado: no se pide, se asigna.
+Nace con matrícula y precio provisionales.
+
+"Reforzamiento con vereda" es el tipo de trabajo de la actividad con vereda,
+con las partidas en el orden en que se hace la obra. Las que ya estaban en el
+catálogo conservan su precio: el usuario pidió no tocarlas, porque las cobran
+también cabria y viento. Las nuevas nacen con el precio que dio; la reparación
+de vereda de 15 cm y los refuerzos, que no lo tenían, a PRECIO_DE_PASO. Las
+reglas que las llenan (preguntas, paños, corte y rotura) están en la app.
+
+Nada de lo que ya existe se pisa: lo corregido desde Configuración sobrevive
+al próximo despliegue. Lo único que se deja exacto es el conjunto de partidas
+y materiales del tipo de trabajo.
 
 Es idempotente. Lo corre el script de despliegue en cada build.
 """
+from decimal import Decimal
+
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from core.models import Actividad
+from core.models import (Actividad, ActividadTipoTrabajo, ManoDeObra, Material,
+                         TipoTrabajo)
+
+from .configurar_cabria import Command as ConfigurarCabria
+
+CON_VEREDA = "Reforzamiento de poste con vereda"
 
 ACTIVIDADES = [
-    "Reforzamiento de poste con vereda",
+    CON_VEREDA,
     "Reforzamiento de poste sin vereda / piso especial",
 ]
 
+PRECIO_DE_PASO = Decimal("1.00")
+
+CEMENTO = {
+    "matricula":   "CEMENTO-425",
+    "descripcion": "CEMENTO (BOLSA 42.5 KG)",
+    "precio":      PRECIO_DE_PASO,
+}
+
+TIPO_CON_VEREDA = "Reforzamiento con vereda"
+
+# Las partidas que no estaban en el catálogo, con el precio que dio el
+# usuario el 2026-09-28.
+PARTIDAS_NUEVAS = {
+    "*090251": ("REFORZAMIENTO CON VEREDA", Decimal("467.52")),
+    "*095275": ("REPARACION DE VEREDA DE 15CM M2", PRECIO_DE_PASO),
+    "*095280": ("REPARACION DE VEREDA DE 20CM M2", Decimal("140.00")),
+    "*091845": ("ROTURA DE VEREDA CON MAQUINA", Decimal("33.35")),
+    "*094919": ("CIMENTACION COMPLEMENTARIA", Decimal("56.35")),
+    "*091830": ("ROTURA DE PISTA CUALQUIER ESPESOR", Decimal("54.04")),
+    "*095230": ("REPARACION DE ASFALTO M2", Decimal("122.42")),
+    "*098822": ("ROTURA DE CIMENTACION", Decimal("78.09")),
+    "*099090": ("ROTULACION DE PAT", Decimal("29.30")),
+    "*091673": ("COLOC.TUBO PVC.A POSTE P/PUNTO DE ALIMENTACION "
+                "(FLEJADO DE SUBIDA)", Decimal("28.00")),
+}
+
+# Las chaquetas de refuerzo. Se liquida una sola por SST: la regla de la app
+# las agrupa por la palabra "REFUERZO" de la descripción.
+REFUERZOS = {
+    "6913290": "REFUERZO DE FIBRA 7 / 100",
+    "6913291": "REFUERZO DE FIBRA 7 / 200",
+    "6913292": "REFUERZO DE FIBRA 8,7 / 200",
+    "6913293": "REFUERZO DE FIBRA 8,7 / 300",
+    "6913294": "REFUERZO DE FIBRA 11,5 / 300",
+    "6913284": "REFUERZO DE FIBRA 13 / 300-400-500",
+    "6913286": "REFUERZO DE FIBRA 15 / 400-500",
+}
+
+# El tipo de trabajo, con la cantidad con que arranca cada fila. La
+# inspección va siempre y el reforzamiento es uno; lo demás se pregunta o se
+# calcula en la app. El orden es el que ve quien liquida.
+CATALOGO_CON_VEREDA = {
+    "materiales": {matricula: 0 for matricula in REFUERZOS},
+    "mano_de_obra": {
+        "*094395": 1,  # inspección previa: siempre
+        "*090248": 0,  # trípode: se pregunta
+        "*090251": 1,  # reforzamiento con vereda
+        "*095266": 0,  # reparación de vereda 10 cm = m² de sus paños
+        "*095275": 0,  # reparación de vereda 15 cm = m² de sus paños
+        "*095280": 0,  # reparación de vereda 20 cm = m² de sus paños
+        "*091842": 0,  # corte de vereda = m² de vereda, hasta 2
+        "*091845": 0,  # rotura con máquina = m² de vereda pasados los 2
+        "*094919": 0,  # cimentación complementaria: se pregunta
+        "*091830": 0,  # rotura de pista = m² de sus paños
+        "*095230": 0,  # reparación de asfalto = m² de sus paños / 0.60
+        "*098203": 0,  # tubo corrugado: se pregunta
+        "*098822": 0,  # rotura de cimentación: se pregunta
+        "*090633": 0,  # acarreo = metros por viajes
+        "*099090": 0,  # rotulación de PAT: se pregunta
+        "*091673": 0,  # flejado de subida: se pregunta
+    },
+}
+
 
 class Command(BaseCommand):
-    help = "Crea las actividades de reforzamiento de poste, de encargado."
+    help = ("Crea las actividades de reforzamiento de poste, el cemento y "
+            f"«{TIPO_CON_VEREDA}».")
 
     @transaction.atomic
     def handle(self, *args, **options):
@@ -32,3 +117,42 @@ class Command(BaseCommand):
                 actividad.de_encargado = True
                 actividad.save(update_fields=["de_encargado"])
                 self.stdout.write(f"  «{nombre}» pasa a ser de encargado")
+
+        cemento, nuevo = Material.objects.get_or_create(
+            matricula=CEMENTO["matricula"],
+            defaults={"descripcion": CEMENTO["descripcion"],
+                      "precio": CEMENTO["precio"],
+                      "es_agregado": True})
+        if nuevo:
+            self.stdout.write(self.style.SUCCESS(
+                f"Material creado: «{cemento.descripcion}»."))
+        elif not cemento.es_agregado:
+            cemento.es_agregado = True
+            cemento.save(update_fields=["es_agregado"])
+            self.stdout.write(f"  «{cemento.descripcion}» pasa a ser agregado")
+
+        for matricula, descripcion in REFUERZOS.items():
+            _, nuevo = Material.objects.get_or_create(
+                matricula=matricula,
+                defaults={"descripcion": descripcion, "precio": PRECIO_DE_PASO})
+            if nuevo:
+                self.stdout.write(
+                    f"  Material creado a {PRECIO_DE_PASO}: {matricula}")
+
+        for codigo, (descripcion, precio) in PARTIDAS_NUEVAS.items():
+            _, nueva = ManoDeObra.objects.get_or_create(
+                partida=codigo,
+                defaults={"descripcion": descripcion, "precio": precio})
+            if nueva:
+                self.stdout.write(f"  Partida creada a {precio}: {codigo}")
+
+        tipo, creado = TipoTrabajo.objects.get_or_create(nombre=TIPO_CON_VEREDA)
+        if creado:
+            self.stdout.write(f"  Tipo de trabajo creado: «{TIPO_CON_VEREDA}».")
+        ConfigurarCabria(stdout=self.stdout, stderr=self.stderr)._catalogo(
+            tipo, CATALOGO_CON_VEREDA)
+        _, vinculado = ActividadTipoTrabajo.objects.get_or_create(
+            actividad=Actividad.objects.get(nombre=CON_VEREDA),
+            tipo_trabajo=tipo)
+        if vinculado:
+            self.stdout.write(f"  + {TIPO_CON_VEREDA}")
