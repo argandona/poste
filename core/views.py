@@ -142,6 +142,11 @@ def qs_empresa(qs, request, campo='empresa'):
     return qs
 
 
+# Quienes aprueban pedidos y devoluciones, y por eso reciben el aviso cuando
+# llega uno nuevo. Tienen que ser los mismos que puede_aprobar_pedido().
+ROLES_QUE_APRUEBAN = (Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
+
+
 def solo_propios(qs, request, puede_aprobar):
     """Pedidos o devoluciones que le tocan a quien consulta.
 
@@ -1157,7 +1162,7 @@ class PedidoViewSet(viewsets.ModelViewSet):
         pedido = serializer.save()
         empresa_id = pedido.usuario.empresa_id
         tokens = list(
-            Usuario.objects.filter(con_rol(Rol.ENCARGADO_ALMACEN), empresa_id=empresa_id, activo=True)
+            Usuario.objects.filter(con_rol(*ROLES_QUE_APRUEBAN), empresa_id=empresa_id, activo=True)
             .exclude(fcm_token__isnull=True).exclude(fcm_token='')
             .values_list('fcm_token', flat=True)
         )
@@ -1263,7 +1268,7 @@ class DevolucionViewSet(viewsets.ModelViewSet):
         devolucion = serializer.save()
         empresa_id = devolucion.usuario.empresa_id
         tokens = list(
-            Usuario.objects.filter(con_rol(Rol.ENCARGADO_ALMACEN), empresa_id=empresa_id, activo=True)
+            Usuario.objects.filter(con_rol(*ROLES_QUE_APRUEBAN), empresa_id=empresa_id, activo=True)
             .exclude(fcm_token__isnull=True).exclude(fcm_token='')
             .values_list('fcm_token', flat=True)
         )
