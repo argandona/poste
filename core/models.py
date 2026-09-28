@@ -226,10 +226,40 @@ class Actividad(models.Model):
     # poste una SST es un poste; en una reforma son varios y el capataz los va
     # agregando en obra. Solo con esto en True aparece el botón de agregar.
     varios_postes = models.BooleanField(default=False)
+    # Las actividades de los encargados. Un encargado solo ve estas, y un
+    # capataz solo las demás: no se cruzan al liquidar. Quien asigna o revisa
+    # (coordinador, liquidador, almacén, administración) ve todas.
+    de_encargado = models.BooleanField(default=False)
     class Meta:
         db_table = "actividad"
     def __str__(self):
         return self.nombre
+
+
+# Roles que ven todas las actividades: no liquidan en obra, las asignan,
+# configuran o revisan.
+ROLES_QUE_VEN_TODAS = {Rol.SUPERADMIN, Rol.ADMIN_EMPRESA, Rol.LIQUIDADOR,
+                       Rol.ENCARGADO_ALMACEN, Rol.COORDINADOR}
+
+
+def actividades_para(usuario):
+    """Las actividades que [usuario] puede elegir o recibir.
+
+    El encargado ve las de encargado y el capataz las demás. Quien tiene los
+    dos roles ve las dos; quien tiene un rol que asigna o revisa, todas."""
+    todas = Actividad.objects.all()
+    roles = usuario.roles if usuario else set()
+    if roles & ROLES_QUE_VEN_TODAS:
+        return todas
+    de_encargado = Rol.ENCARGADO in roles
+    de_capataz = Rol.CAPATAZ in roles
+    if de_encargado and de_capataz:
+        return todas
+    if de_encargado:
+        return todas.filter(de_encargado=True)
+    if de_capataz:
+        return todas.filter(de_encargado=False)
+    return todas
 
 
 class SST(models.Model):
