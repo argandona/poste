@@ -615,7 +615,7 @@ class LiquidacionSuministroSerializer(serializers.ModelSerializer):
             'suministro', 'numero_suministro',
             'suministro_externo', 'sst_externo',
             'usuario', 'usuario_nombre', 'tipo_trabajo', 'tipo_trabajo_nombre',
-            'fecha', 'observacion', 'partidas', 'materiales',
+            'fecha', 'observacion', 'partidas', 'materiales', 'medidas',
         ]
 
 
@@ -772,6 +772,8 @@ class LiquidacionSuministroCreateSerializer(serializers.Serializer):
     observacion         = serializers.CharField(required=False, allow_blank=True, default='')
     # Lo propio del tipo de trabajo (p. ej. suministros trasladados), aparte.
     comentario          = serializers.CharField(required=False, allow_blank=True, default='')
+    # Los paños y los metros con que se calcularon las cantidades.
+    medidas             = serializers.DictField(required=False, default=dict)
     partidas            = LiquidacionPartidaCreateSerializer(many=True)
     materiales          = ConsumoMaterialCreateSerializer(many=True, required=False, default=list)
     # Estado a fijar en Render: EJECUTADO (liquida MO + materiales) o DEVUELTO (solo MO)

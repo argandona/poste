@@ -6,10 +6,11 @@ poste) y el capataz solo las demás. Quien asigna o revisa las ve todas, y al
 asignar pide las que le corresponden a quien recibe la obra.
 """
 import io
+from decimal import Decimal
 
 from django.core.management import call_command
 
-from ..models import Actividad, Rol, SST, SSTSuministro, Suministro, Usuario
+from ..models import Actividad, Material, Rol, SST, SSTSuministro, Suministro, Usuario
 from .base import BaseAPITestCase
 
 
@@ -159,3 +160,20 @@ class ActividadesDeEncargadoTests(BaseAPITestCase):
         call_command("configurar_reforzamiento", stdout=io.StringIO())
         self.assertEqual(Actividad.objects.filter(
             nombre__startswith="Reforzamiento de poste").count(), 2)
+        self.assertEqual(Material.objects.filter(
+            matricula="CEMENTO-425").count(), 1)
+
+    def test_el_comando_crea_el_cemento_como_agregado(self):
+        call_command("configurar_reforzamiento", stdout=io.StringIO())
+        cemento = Material.objects.get(matricula="CEMENTO-425")
+        self.assertTrue(cemento.es_agregado)
+        self.assertIn("42.5 KG", cemento.descripcion)
+        self.assertEqual(cemento.precio, Decimal("1.00"))
+
+    def test_el_comando_no_pisa_el_precio_corregido(self):
+        call_command("configurar_reforzamiento", stdout=io.StringIO())
+        Material.objects.filter(matricula="CEMENTO-425").update(
+            precio=Decimal("28.50"))
+        call_command("configurar_reforzamiento", stdout=io.StringIO())
+        self.assertEqual(Material.objects.get(matricula="CEMENTO-425").precio,
+                         Decimal("28.50"))
