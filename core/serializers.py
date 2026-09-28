@@ -204,6 +204,8 @@ class DetalleIngresoTecsurSerializer(serializers.ModelSerializer):
     class Meta:
         model  = DetalleIngresoTecsur
         fields = '__all__'
+        # Lo pone el create del padre: en el cuerpo no viene.
+        extra_kwargs = {'ingreso': {'read_only': True}}
 
 class IngresoTecsurSerializer(serializers.ModelSerializer):
     detalles          = DetalleIngresoTecsurSerializer(many=True, read_only=True)
@@ -242,6 +244,8 @@ class DetalleDevolucionTecsurSerializer(serializers.ModelSerializer):
     class Meta:
         model  = DetalleDevolucionTecsur
         fields = '__all__'
+        # Lo pone el create del padre: en el cuerpo no viene.
+        extra_kwargs = {'devolucion_tecsur': {'read_only': True}}
 
 class DevolucionTecsurSerializer(serializers.ModelSerializer):
     detalles = DetalleDevolucionTecsurSerializer(many=True, read_only=True)
@@ -277,6 +281,8 @@ class DetalleMaterialMalogradoSerializer(serializers.ModelSerializer):
     class Meta:
         model  = DetalleMaterialMalogrado
         fields = '__all__'
+        # Lo pone el create del padre: en el cuerpo no viene.
+        extra_kwargs = {'malogrado': {'read_only': True}}
 
 class MaterialMalogradoSerializer(serializers.ModelSerializer):
     detalles = DetalleMaterialMalogradoSerializer(many=True, read_only=True)
@@ -311,6 +317,8 @@ class DetalleTransferenciaSerializer(serializers.ModelSerializer):
     class Meta:
         model  = DetalleTransferencia
         fields = '__all__'
+        # Lo pone el create del padre: en el cuerpo no viene.
+        extra_kwargs = {'transferencia': {'read_only': True}}
 
 class TransferenciaAlmacenSerializer(serializers.ModelSerializer):
     detalles               = DetalleTransferenciaSerializer(many=True, read_only=True)
@@ -486,6 +494,8 @@ class DetalleInventarioSerializer(serializers.ModelSerializer):
     class Meta:
         model  = DetalleInventario
         fields = '__all__'
+        # Lo pone el create del padre: en el cuerpo no viene.
+        extra_kwargs = {'inventario': {'read_only': True}}
 
 class InventarioSerializer(serializers.ModelSerializer):
     detalles       = DetalleInventarioSerializer(many=True, read_only=True)
