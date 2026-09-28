@@ -85,9 +85,23 @@ class ReforzamientoConVeredaTests(BaseAPITestCase):
     def test_lleva_los_siete_refuerzos(self):
         tipo = self.configurar()
         descripciones = [m.material.descripcion for m in tipo.materiales.all()]
-        self.assertEqual(len(descripciones), 7)
-        self.assertTrue(all("REFUERZO" in d for d in descripciones))
+        self.assertEqual(sum("REFUERZO" in d for d in descripciones), 7)
         self.assertFalse(Material.objects.get(matricula="6913290").es_agregado)
+
+    def test_lleva_fleje_hebilla_y_pegamento(self):
+        # El fleje ya existe por cabria: se usa el suyo, sin tocarlo.
+        Material.objects.create(
+            matricula="1014213", precio="12.50",
+            descripcion="FLEJE DE ACERO INOXIDABLE 19MM (3/4\")")
+        tipo = self.configurar()
+        matriculas = {m.material.matricula for m in tipo.materiales.all()}
+        self.assertTrue({"1014213", "1014308", "2139148"} <= matriculas)
+        fleje = Material.objects.get(matricula="1014213")
+        self.assertEqual(fleje.precio, Decimal("12.50"))
+        self.assertIn("ACERO", fleje.descripcion)
+        pegamento = Material.objects.get(matricula="2139148")
+        self.assertEqual(pegamento.descripcion, "PEGAMENTO EN GEL")
+        self.assertEqual(pegamento.precio, Decimal("1.00"))
 
     def test_no_pisa_lo_corregido_desde_configuracion(self):
         self.configurar()
@@ -103,7 +117,7 @@ class ReforzamientoConVeredaTests(BaseAPITestCase):
         self.configurar()
         tipo = self.configurar()
         self.assertEqual(tipo.partidas.count(), 16)
-        self.assertEqual(tipo.materiales.count(), 7)
+        self.assertEqual(tipo.materiales.count(), 10)
 
     # ── Las medidas viajan con la liquidación ────────────────────────────────
 
