@@ -51,7 +51,7 @@ def send_notification(tokens, title, body, data=None):
             android=messaging.AndroidConfig(
                 priority='high',
                 notification=messaging.AndroidNotification(
-                    channel_id='encossa_alertas',
+                    channel_id='tecsur_alertas',
                     default_vibrate_timings=True,
                     sound='default',
                 ),
