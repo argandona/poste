@@ -434,7 +434,8 @@ class StockAlmacen(models.Model):
     id_stock_almacen = models.AutoField(primary_key=True)
     almacen  = models.ForeignKey(Almacen,  on_delete=models.PROTECT, related_name="stocks")
     material = models.ForeignKey(Material, on_delete=models.PROTECT, related_name="stocks_almacen")
-    cantidad = models.IntegerField(default=0, validators=[MinValueValidator(0)])
+    # Con decimales: el fleje y el cable se piden y se despachan por metro.
+    cantidad = models.DecimalField(max_digits=12, decimal_places=2, default=0, validators=[MinValueValidator(0)])
     class Meta:
         db_table = "stock_almacen"
         unique_together = ("almacen", "material")
@@ -605,8 +606,8 @@ class DetallePedido(models.Model):
     id_detalle_pedido   = models.AutoField(primary_key=True)
     pedido              = models.ForeignKey(Pedido,   on_delete=models.CASCADE, related_name="detalles")
     material            = models.ForeignKey(Material, on_delete=models.PROTECT, related_name="detalles_pedido")
-    cantidad_solicitada = models.PositiveIntegerField()
-    cantidad_aprobada   = models.PositiveIntegerField(default=0)
+    cantidad_solicitada = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0)])
+    cantidad_aprobada   = models.DecimalField(max_digits=12, decimal_places=2, default=0, validators=[MinValueValidator(0)])
     class Meta:
         db_table = "detalle_pedido"
     def clean(self):
@@ -644,8 +645,8 @@ class DetalleDevolucion(models.Model):
     id_detalle_devolucion = models.AutoField(primary_key=True)
     devolucion            = models.ForeignKey(Devolucion, on_delete=models.CASCADE, related_name="detalles")
     material              = models.ForeignKey(Material,   on_delete=models.PROTECT, related_name="detalles_devolucion")
-    cantidad_solicitada   = models.PositiveIntegerField()
-    cantidad_aprobada     = models.PositiveIntegerField(default=0)
+    cantidad_solicitada   = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0)])
+    cantidad_aprobada     = models.DecimalField(max_digits=12, decimal_places=2, default=0, validators=[MinValueValidator(0)])
     class Meta:
         db_table = "detalle_devolucion"
 
