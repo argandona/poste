@@ -75,11 +75,19 @@ REFUERZOS = {
     "6913286": "REFUERZO DE FIBRA 15 / 400-500",
 }
 
+# Lo demás que se liquida a mano. El fleje y la hebilla ya los trae el
+# catálogo de cabria; si faltaran, nacen con esta descripción.
+MATERIALES_A_MANO = {
+    "1014213": 'FLEJE (3/4")',
+    "1014308": 'HEBILLA (3/4")',
+    "2139148": "PEGAMENTO EN GEL",
+}
+
 # El tipo de trabajo, con la cantidad con que arranca cada fila. La
 # inspección va siempre y el reforzamiento es uno; lo demás se pregunta o se
 # calcula en la app. El orden es el que ve quien liquida.
 CATALOGO_CON_VEREDA = {
-    "materiales": {matricula: 0 for matricula in REFUERZOS},
+    "materiales": {matricula: 0 for matricula in [*REFUERZOS, *MATERIALES_A_MANO]},
     "mano_de_obra": {
         "*094395": 1,  # inspección previa: siempre
         "*090248": 0,  # trípode: se pregunta
@@ -131,7 +139,7 @@ class Command(BaseCommand):
             cemento.save(update_fields=["es_agregado"])
             self.stdout.write(f"  «{cemento.descripcion}» pasa a ser agregado")
 
-        for matricula, descripcion in REFUERZOS.items():
+        for matricula, descripcion in {**REFUERZOS, **MATERIALES_A_MANO}.items():
             _, nuevo = Material.objects.get_or_create(
                 matricula=matricula,
                 defaults={"descripcion": descripcion, "precio": PRECIO_DE_PASO})
