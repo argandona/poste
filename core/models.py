@@ -484,7 +484,8 @@ class DetalleIngresoTecsur(models.Model):
     id_detalle_ingreso = models.AutoField(primary_key=True)
     ingreso   = models.ForeignKey(IngresoTecsur, on_delete=models.CASCADE, related_name="detalles")
     material  = models.ForeignKey(Material,      on_delete=models.PROTECT, related_name="detalles_ingreso")
-    cantidad  = models.PositiveIntegerField()
+    # Con decimales, como el stock del almacén: el fleje llega por metro.
+    cantidad  = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
     class Meta:
         db_table = "detalle_ingreso_tecsur"
         unique_together = ("ingreso", "material")
