@@ -147,6 +147,73 @@ def qs_empresa(qs, request, campo='empresa'):
 ROLES_QUE_APRUEBAN = (Rol.ENCARGADO_ALMACEN, Rol.SUPERADMIN)
 
 
+def _texto_de_celda(valor):
+    """Una celda como texto, sin el ".0" que Excel le pone a los números."""
+    if valor is None:
+        return ''
+    if isinstance(valor, float) and valor.is_integer():
+        valor = int(valor)
+    return str(valor).strip()
+
+
+def _sin_tildes(texto):
+    return ''.join(c for c in unicodedata.normalize('NFD', texto.lower())
+                   if unicodedata.category(c) != 'Mn')
+
+
+def lineas_de_ingreso(filas):
+    """Las líneas de un Excel de ingreso, listas para revisar.
+
+    Las columnas se buscan por su título en las primeras filas: la que diga
+    "matrícula" (o "código") y la que diga "cantidad". Sin títulos se toma la
+    A como matrícula y la B como cantidad."""
+    col_mat, col_cant, inicio = 0, 1, 0
+    for i, fila in enumerate(filas[:10]):
+        titulos = [_sin_tildes(_texto_de_celda(c)) for c in fila]
+        mat = next((j for j, t in enumerate(titulos)
+                    if 'matricula' in t or 'codigo' in t), None)
+        cant = next((j for j, t in enumerate(titulos) if 'cantidad' in t), None)
+        if mat is not None and cant is not None:
+            col_mat, col_cant, inicio = mat, cant, i + 1
+            break
+
+    sumadas, orden, sin_cantidad = {}, [], []
+    for numero, fila in enumerate(filas[inicio:], start=inicio + 1):
+        celdas = list(fila) + [None] * 2
+        matricula = _texto_de_celda(celdas[col_mat])
+        if not matricula:
+            continue
+        try:
+            cantidad = Decimal(_texto_de_celda(celdas[col_cant]).replace(',', '.'))
+        except ArithmeticError:
+            cantidad = None
+        if cantidad is None or not cantidad.is_finite() or cantidad <= 0:
+            sin_cantidad.append({'fila': numero, 'matricula': matricula})
+            continue
+        if matricula not in sumadas:
+            orden.append(matricula)
+            sumadas[matricula] = {'fila': numero, 'cantidad': Decimal('0')}
+        sumadas[matricula]['cantidad'] += cantidad
+
+    materiales = {m.matricula: m for m in
+                  Material.objects.filter(matricula__in=orden)}
+    lineas, no_encontrados = [], []
+    for matricula in orden:
+        dato = sumadas[matricula]
+        material = materiales.get(matricula)
+        if material is None:
+            no_encontrados.append({'fila': dato['fila'], 'matricula': matricula})
+            continue
+        lineas.append({
+            'material': material.id_material,
+            'matricula': matricula,
+            'descripcion': material.descripcion,
+            'cantidad': float(dato['cantidad'].quantize(Decimal('0.01'))),
+        })
+    return {'lineas': lineas, 'no_encontrados': no_encontrados,
+            'sin_cantidad': sin_cantidad}
+
+
 def solo_propios(qs, request, puede_aprobar):
     """Pedidos o devoluciones que le tocan a quien consulta.
 
@@ -1123,6 +1190,56 @@ class IngresoTecsurViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         ingreso = serializer.save()
         return Response(IngresoTecsurSerializer(ingreso).data, status=201)
+
+    @action(detail=False, methods=['post'])
+    def leer_excel(self, request):
+        """POST /api/ingresos-tecsur/leer_excel/  { archivo: <xlsx en base64> }
+
+        Lee un Excel de ingreso y devuelve sus líneas para revisarlas en la
+        app antes de registrar: no toca el stock. Busca las columnas por su
+        título (matrícula y cantidad); sin títulos, toma la A y la B. Una
+        matrícula repetida se suma. Avisa de las que no están en el catálogo y
+        de las filas sin una cantidad válida."""
+        import base64
+        import io
+
+        actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
+        if not actor or not actor.puede_gestionar_almacen():
+            return Response(
+                {'detail': 'Solo el encargado de almacén puede registrar ingresos.'},
+                status=403)
+        try:
+            contenido = base64.b64decode(request.data.get('archivo') or '',
+                                         validate=True)
+            libro = openpyxl.load_workbook(io.BytesIO(contenido),
+                                           read_only=True, data_only=True)
+        except Exception as exc:  # base64 roto, .xls viejo, zip o xml inválido
+            raise ErrorNegocio(
+                'No se pudo leer el archivo: tiene que ser un Excel .xlsx.') from exc
+        filas = list(libro.worksheets[0].iter_rows(values_only=True))
+        return Response(lineas_de_ingreso(filas))
+
+    @action(detail=False, methods=['get'])
+    def plantilla_excel(self, request):
+        """GET /api/ingresos-tecsur/plantilla_excel/ — el Excel en blanco con
+        las columnas que lee leer_excel."""
+        import io
+        from django.http import HttpResponse
+
+        libro = openpyxl.Workbook()
+        hoja = libro.active
+        hoja.title = 'Ingreso'
+        hoja.append(['Matrícula', 'Descripción', 'Cantidad'])
+        hoja.append(['1014213', 'FLEJE (3/4") (ejemplo, bórrala)', 2.5])
+        for columna, ancho in (('A', 14), ('B', 50), ('C', 12)):
+            hoja.column_dimensions[columna].width = ancho
+        salida = io.BytesIO()
+        libro.save(salida)
+        resp = HttpResponse(
+            salida.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        resp['Content-Disposition'] = 'attachment; filename="plantilla_ingreso.xlsx"'
+        return resp
 
     @action(detail=False, methods=['get'])
     def faltantes(self, request):
