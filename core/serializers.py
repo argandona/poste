@@ -201,6 +201,8 @@ class ProveedorSerializer(serializers.ModelSerializer):
 # ── IngresoTecsur ────────────────────────────────
 class DetalleIngresoTecsurSerializer(serializers.ModelSerializer):
     material_descripcion = serializers.CharField(source='material.descripcion', read_only=True)
+    material_matricula   = serializers.CharField(source='material.matricula',   read_only=True)
+    cantidad             = CantidadField(min_value=Decimal('0.01'))
     class Meta:
         model  = DetalleIngresoTecsur
         fields = '__all__'

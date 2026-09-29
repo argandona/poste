@@ -1104,7 +1104,62 @@ class IngresoTecsurViewSet(viewsets.ModelViewSet):
         return IngresoTecsurSerializer
 
     def get_queryset(self):
-        return IngresoTecsur.objects.prefetch_related('detalles__material').select_related('almacen','proveedor','usuario')
+        qs = (IngresoTecsur.objects.prefetch_related('detalles__material')
+              .select_related('almacen', 'proveedor', 'usuario')
+              .order_by('-fecha', '-id_ingreso'))
+        return qs_empresa(qs, self.request, campo='almacen__empresa')
+
+    def create(self, request, *args, **kwargs):
+        """Solo quien gestiona el almacén registra lo que entra. El ingreso va
+        a nombre de quien tiene la sesión, no de quien diga el cuerpo."""
+        actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
+        if not actor or not actor.puede_gestionar_almacen():
+            return Response(
+                {'detail': 'Solo el encargado de almacén puede registrar ingresos.'},
+                status=403)
+        datos = request.data.copy()
+        datos['usuario'] = actor.pk
+        serializer = IngresoTecsurCreateSerializer(data=datos)
+        serializer.is_valid(raise_exception=True)
+        ingreso = serializer.save()
+        return Response(IngresoTecsurSerializer(ingreso).data, status=201)
+
+    @action(detail=False, methods=['get'])
+    def faltantes(self, request):
+        """GET /api/ingresos-tecsur/faltantes/?almacen=<id>
+
+        Lo que le falta al almacén para despachar los pedidos pendientes de los
+        camiones de su empresa: por material, lo pedido, lo que hay y la
+        diferencia. Solo los materiales que no alcanzan."""
+        from django.db.models import Sum
+
+        almacen = qs_empresa(Almacen.objects.all(), request).filter(
+            pk=request.query_params.get('almacen')).first()
+        if almacen is None:
+            raise ErrorNegocio('Indica un almacén de tu empresa.')
+        pedido = (DetallePedido.objects
+                  .filter(pedido__estado='pendiente',
+                          pedido__camion__empresa_id=almacen.empresa_id)
+                  .values('material_id', 'material__matricula',
+                          'material__descripcion')
+                  .annotate(total=Sum('cantidad_solicitada'))
+                  .order_by('material__matricula'))
+        hay = dict(StockAlmacen.objects.filter(almacen=almacen)
+                   .values_list('material_id', 'cantidad'))
+        salida = []
+        for fila in pedido:
+            stock = hay.get(fila['material_id'], Decimal('0'))
+            falta = fila['total'] - stock
+            if falta > 0:
+                salida.append({
+                    'material': fila['material_id'],
+                    'matricula': fila['material__matricula'],
+                    'descripcion': fila['material__descripcion'],
+                    'pedido': float(fila['total']),
+                    'stock': float(stock),
+                    'falta': float(falta),
+                })
+        return Response(salida)
 
 
 # ── DevolucionTecsur ──────────────────────────────────────────────────────────
