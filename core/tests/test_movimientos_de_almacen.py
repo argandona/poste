@@ -148,3 +148,84 @@ class ModuloDeIngresosTests(BaseAPITestCase):
         resp = self.client.get(
             f"/api/ingresos-tecsur/faltantes/?almacen={self.almacen.pk}")
         self.assertEqual(resp.json(), [])
+
+
+class IngresoDesdeExcelTests(BaseAPITestCase):
+    """El Excel se lee para revisarlo: no mueve stock hasta registrar."""
+
+    def excel(self, filas):
+        import base64
+        import io
+
+        import openpyxl
+        libro = openpyxl.Workbook()
+        for fila in filas:
+            libro.active.append(fila)
+        salida = io.BytesIO()
+        libro.save(salida)
+        return base64.b64encode(salida.getvalue()).decode()
+
+    def leer(self, filas=None, archivo=None):
+        self.auth(self.encargado)
+        return self.client.post("/api/ingresos-tecsur/leer_excel/",
+                                {"archivo": archivo or self.excel(filas)},
+                                format="json")
+
+    def test_lee_por_titulos_suma_repetidas_y_no_mueve_stock(self):
+        resp = self.leer([
+            ["INGRESO DE MATERIALES"],
+            ["Descripción", "Matrícula", "Cantidad"],
+            ["Cable A", "MAT-A", 2.5],
+            ["Cable B", "MAT-B", 3],
+            ["Cable A otra vez", "MAT-A", "1,5"],
+        ])
+        self.assertEqual(resp.status_code, 200, resp.content)
+        lineas = {l["matricula"]: l["cantidad"] for l in resp.json()["lineas"]}
+        self.assertEqual(lineas, {"MAT-A": 4.0, "MAT-B": 3.0})
+        self.assertEqual(self.stock_almacen(self.material_a), Decimal("10"))
+
+    def test_sin_titulos_toma_la_a_y_la_b(self):
+        from ..models import Material
+        Material.objects.create(matricula="6913292", descripcion="REFUERZO",
+                                precio="1.00")
+        # Excel guarda la matrícula como número: 6913292.0
+        resp = self.leer([[6913292.0, 500], ["MAT-B", 2]])
+        lineas = {l["matricula"]: l["cantidad"] for l in resp.json()["lineas"]}
+        self.assertEqual(lineas, {"6913292": 500.0, "MAT-B": 2.0})
+
+    def test_avisa_lo_que_no_esta_y_lo_que_no_tiene_cantidad(self):
+        resp = self.leer([
+            ["Matrícula", "Cantidad"],
+            ["MAT-A", 5],
+            ["NO-EXISTE", 3],
+            ["MAT-B", "mucho"],
+            ["MAT-B", 0],
+            [None, None],
+        ])
+        datos = resp.json()
+        self.assertEqual([l["matricula"] for l in datos["lineas"]], ["MAT-A"])
+        self.assertEqual(datos["no_encontrados"],
+                         [{"fila": 3, "matricula": "NO-EXISTE"}])
+        self.assertEqual([f["fila"] for f in datos["sin_cantidad"]], [4, 5])
+
+    def test_un_archivo_que_no_es_excel_da_un_mensaje_claro(self):
+        import base64
+        resp = self.leer(archivo=base64.b64encode(b"hola").decode())
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn(".xlsx", resp.json()["detail"])
+
+    def test_un_capataz_no_lee_excel_de_ingreso(self):
+        self.auth(self.capataz)
+        resp = self.client.post("/api/ingresos-tecsur/leer_excel/",
+                                {"archivo": self.excel([["MAT-A", 1]])},
+                                format="json")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_la_plantilla_se_lee_a_si_misma(self):
+        import base64
+        self.auth(self.encargado)
+        resp = self.client.get("/api/ingresos-tecsur/plantilla_excel/")
+        self.assertEqual(resp.status_code, 200)
+        leida = self.leer(archivo=base64.b64encode(resp.content).decode()).json()
+        # La fila de ejemplo es el fleje, que en esta base no existe.
+        self.assertEqual(leida["no_encontrados"][0]["matricula"], "1014213")
