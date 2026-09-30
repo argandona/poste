@@ -1,18 +1,20 @@
 """
-La actividad aérea de viento: varios postes por SST y sus retiros siempre.
+La actividad aérea de viento: varios postes por SST y sus tipos de trabajo.
 
-Sus demás tipos de trabajo se arman desde Configuración, así que lo que
-importa es que un despliegue no se los lleve. "Retiros - otros - viento", en
-cambio, va siempre y con el mismo catálogo que los retiros de cabria.
+"Poste viento" va primero y vacío. Alumbrado, ferretería y conexiones son
+copias de las de cabria con nombre propio; las retenidas y las ménsulas son
+las mismas de cabria. "Retiros - otros - viento" va al final, con el catálogo
+de los retiros de cabria. Lo que se agregue desde Configuración sobrevive.
 """
 from decimal import Decimal
 
 from django.core.management import call_command
 
+from ..management.commands.configurar_aereo_viento import COMPARTIDOS, COPIAS
 from ..management.commands.configurar_cabria import CATALOGO
 from ..models import (
-    Actividad, ActividadTipoTrabajo, ManoDeObra, TipoTrabajo,
-    TipoTrabajoManoDeObra,
+    Actividad, ActividadTipoTrabajo, ManoDeObra, Material, TipoTrabajo,
+    TipoTrabajoManoDeObra, TipoTrabajoMaterial,
 )
 from .base import BaseAPITestCase
 
@@ -21,6 +23,9 @@ RETIROS = "Retiros - otros - viento"
 PARTIDAS_DE_CABRIA = list(CATALOGO["Retiros - otros - cabria"]["mano_de_obra"])
 # El retiro del poste de fibra: viento lo retira y cabria no.
 PARTIDAS_DE_VIENTO = PARTIDAS_DE_CABRIA + ["*090468"]
+POSTE = "Poste viento"
+# Todos, en el orden de la obra.
+TIPOS = [POSTE, *COPIAS, *COMPARTIDOS, RETIROS]
 
 
 class AereoVientoTests(BaseAPITestCase):
@@ -31,6 +36,16 @@ class AereoVientoTests(BaseAPITestCase):
             ManoDeObra.objects.get_or_create(
                 partida=partida,
                 defaults={"descripcion": partida, "precio": Decimal("1.00")})
+        # El catálogo de las copias, para que haya algo que copiar.
+        for original in COPIAS.values():
+            for partida in CATALOGO[original]["mano_de_obra"]:
+                ManoDeObra.objects.get_or_create(
+                    partida=partida,
+                    defaults={"descripcion": partida, "precio": Decimal("1.00")})
+            for matricula in CATALOGO[original]["materiales"]:
+                Material.objects.get_or_create(
+                    matricula=matricula,
+                    defaults={"descripcion": matricula, "precio": Decimal("1.00")})
 
     def configurar(self):
         call_command("configurar_aereo_viento", verbosity=0)
@@ -42,10 +57,44 @@ class AereoVientoTests(BaseAPITestCase):
         return list(self.actividad().tipos_trabajo
                     .values_list("tipo_trabajo__nombre", flat=True))
 
-    def test_se_crea_con_varios_postes_y_solo_sus_retiros(self):
+    def test_se_crea_con_varios_postes_y_sus_tipos_en_orden(self):
         self.configurar()
         self.assertTrue(self.actividad().varios_postes)
-        self.assertEqual(self.tipos(), [RETIROS])
+        self.assertEqual(self.tipos(), TIPOS)
+
+    def test_el_poste_nace_vacio_y_lo_cargado_despues_se_respeta(self):
+        self.configurar()
+        poste = TipoTrabajo.objects.get(nombre=POSTE)
+        self.assertEqual(poste.partidas.count(), 0)
+        self.assertEqual(poste.materiales.count(), 0)
+        TipoTrabajoManoDeObra.objects.create(
+            tipo_trabajo=poste, mano_de_obra=ManoDeObra.objects.first())
+        self.configurar()
+        self.assertEqual(poste.partidas.count(), 1)
+
+    def test_las_copias_llevan_el_catalogo_de_su_original(self):
+        self.configurar()
+        for copia, original in COPIAS.items():
+            tipo = TipoTrabajo.objects.get(nombre=copia)
+            partidas = list(TipoTrabajoManoDeObra.objects
+                            .filter(tipo_trabajo=tipo).order_by("orden")
+                            .values_list("mano_de_obra__partida", flat=True))
+            self.assertEqual(partidas, list(CATALOGO[original]["mano_de_obra"]),
+                             copia)
+            materiales = set(TipoTrabajoMaterial.objects
+                             .filter(tipo_trabajo=tipo)
+                             .values_list("material__matricula", flat=True))
+            self.assertEqual(materiales, set(CATALOGO[original]["materiales"]),
+                             copia)
+
+    def test_las_copias_son_tipos_aparte_y_los_compartidos_no(self):
+        self.configurar()
+        for original in COPIAS.values():
+            self.assertFalse(ActividadTipoTrabajo.objects.filter(
+                actividad=self.actividad(), tipo_trabajo__nombre=original
+            ).exists(), original)
+        for nombre in COMPARTIDOS:
+            self.assertEqual(TipoTrabajo.objects.filter(nombre=nombre).count(), 1)
 
     def test_los_retiros_llevan_las_de_cabria_y_el_poste_de_fibra(self):
         self.configurar()
@@ -64,7 +113,7 @@ class AereoVientoTests(BaseAPITestCase):
         self.configurar()
         self.assertEqual(Actividad.objects.filter(nombre=NOMBRE).count(), 1)
         self.assertEqual(TipoTrabajo.objects.filter(nombre=RETIROS).count(), 1)
-        self.assertEqual(self.tipos(), [RETIROS])
+        self.assertEqual(self.tipos(), TIPOS)
 
     def test_lo_armado_en_configuracion_sobrevive_y_los_retiros_van_al_final(self):
         self.configurar()
@@ -72,16 +121,43 @@ class AereoVientoTests(BaseAPITestCase):
         ActividadTipoTrabajo.objects.create(
             actividad=self.actividad(), tipo_trabajo=tipo)
         self.configurar()
-        self.assertEqual(self.tipos(), ["Poste aereo viento", RETIROS])
+        # Nace con orden 0, como el poste: queda con él, delante del resto.
+        self.assertEqual(self.tipos(), ["Poste aereo viento", *TIPOS])
 
     def test_si_alguien_le_quito_los_retiros_vuelven(self):
         self.configurar()
         ActividadTipoTrabajo.objects.filter(
             actividad=self.actividad(), tipo_trabajo__nombre=RETIROS).delete()
         self.configurar()
-        self.assertEqual(self.tipos(), [RETIROS])
+        self.assertEqual(self.tipos(), TIPOS)
 
     def test_si_alguien_le_quito_los_varios_postes_se_los_devuelve(self):
         Actividad.objects.create(nombre=NOMBRE, varios_postes=False)
         self.configurar()
         self.assertTrue(self.actividad().varios_postes)
+
+
+class AlumbradoVientoTests(BaseAPITestCase):
+    """El alumbrado de subterráneo-viento se comporta igual que el de cabria."""
+
+    def test_queda_con_el_catalogo_de_alumbrado_cabria(self):
+        catalogo = CATALOGO["Alumbrado cabria"]
+        for partida in catalogo["mano_de_obra"]:
+            ManoDeObra.objects.create(partida=partida, descripcion=partida,
+                                      precio=Decimal("1.00"))
+        for matricula in catalogo["materiales"]:
+            Material.objects.create(matricula=matricula, descripcion=matricula,
+                                    precio=Decimal("1.00"))
+        tipo = TipoTrabajo.objects.create(nombre="Alumbrado viento")
+        # Lo viejo que no está en cabria se va.
+        viejo = Material.objects.create(matricula="VIEJO", descripcion="viejo",
+                                        precio=Decimal("1.00"))
+        TipoTrabajoMaterial.objects.create(tipo_trabajo=tipo, material=viejo)
+        call_command("configurar_tipos_viento", verbosity=0)
+        partidas = list(TipoTrabajoManoDeObra.objects.filter(tipo_trabajo=tipo)
+                        .order_by("orden")
+                        .values_list("mano_de_obra__partida", flat=True))
+        self.assertEqual(partidas, list(catalogo["mano_de_obra"]))
+        materiales = set(TipoTrabajoMaterial.objects.filter(tipo_trabajo=tipo)
+                         .values_list("material__matricula", flat=True))
+        self.assertEqual(materiales, set(catalogo["materiales"]))
