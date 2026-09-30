@@ -79,7 +79,7 @@ REFUERZOS = {
 # catálogo de cabria; si faltaran, nacen con esta descripción.
 MATERIALES_A_MANO = {
     "1014213": 'FLEJE (3/4")',
-    "1014308": 'HEBILLA (3/4")',
+    "1014308": "GRAPA HEBILLA 3/4",
     "2139148": "PEGAMENTO EN GEL",
 }
 
