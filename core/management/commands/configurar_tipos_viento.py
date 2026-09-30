@@ -18,31 +18,12 @@ from core.models import (
     TipoTrabajoMaterial,
 )
 
+from .configurar_cabria import CATALOGO
+from .configurar_cabria import Command as ConfigurarCabria
+
+ALUMBRADO = "Alumbrado viento"
+
 TIPOS = {
-    "Alumbrado viento": {
-        "materiales": [
-            "5411514",  # conector bimetálico piercing      -> *090810
-            "5411054",  # conector cuña UDC                 -> *091608
-            "5411058",  # conector de derivación tipo cuña  -> *091608
-            "5111215",  # empalme derecho autofundente
-            "5021407",  # conductor sólido TWT bipolar
-            "6941274",  # abrazadera para pastoral
-            "5347174",  # pastoral chileno corto            -> *091346
-            "5347015",  # pastoral bastón                   -> *091346
-            "5347095",  # pastoral JP                       -> *091346
-            "5567146",  # luminaria LED 90W                 -> *091320
-        ],
-        "mano_de_obra": [
-            "*091320",  # luminaria o farola completa
-            "*091316",  # retiro de luminaria      (sale del recupero)
-            "*091322",  # traslado de luminaria    (se pregunta)
-            "*091346",  # pastoral simple
-            "*091357",  # retiro de pastoral       (sale del recupero)
-            "*091356",  # traslado de pastoral     (se pregunta)
-            "*091608",  # empalme aéreo BT con conector cuña
-            "*090810",  # conector cualquier tipo hasta 300 mm2
-        ],
-    },
     # Sin materiales: son horas y traslados, no cosas que se instalen.
     "Otros viento": {
         "materiales": [],
@@ -96,6 +77,17 @@ class Command(BaseCommand):
 
         for nombre, config in TIPOS.items():
             self._configurar(nombre, config)
+
+        # Desde el 2026-09-29 "Alumbrado viento" se comporta igual que
+        # "Alumbrado cabria": el mismo catálogo, con sus cantidades y su
+        # orden, y en la app la misma regla. Sigue siendo su propio tipo.
+        alumbrado = TipoTrabajo.objects.filter(nombre=ALUMBRADO).first()
+        if alumbrado is None:
+            self.stdout.write(self.style.WARNING(
+                f'No existe el tipo de trabajo "{ALUMBRADO}", se omite.'))
+        else:
+            ConfigurarCabria(stdout=self.stdout, stderr=self.stderr)._catalogo(
+                alumbrado, CATALOGO["Alumbrado cabria"])
 
     def _configurar(self, nombre, config):
         try:
