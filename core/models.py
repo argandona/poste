@@ -724,9 +724,11 @@ class DetalleInventario(models.Model):
     id_detalle_inventario = models.AutoField(primary_key=True)
     inventario       = models.ForeignKey(Inventario, on_delete=models.CASCADE, related_name="detalles")
     material         = models.ForeignKey(Material,   on_delete=models.PROTECT, related_name="detalles_inventario")
-    cantidad_fisica  = models.IntegerField()
-    cantidad_teorica = models.IntegerField()
-    diferencia       = models.IntegerField()
+    # Con decimales, como el saldo del camión: el fleje se cuenta por metro, y
+    # con enteros el cierre le borraba los decimales al saldo.
+    cantidad_fisica  = models.DecimalField(max_digits=12, decimal_places=2)
+    cantidad_teorica = models.DecimalField(max_digits=12, decimal_places=2)
+    diferencia       = models.DecimalField(max_digits=12, decimal_places=2)
     observacion      = models.TextField(blank=True)
     class Meta:
         db_table = "detalle_inventario"

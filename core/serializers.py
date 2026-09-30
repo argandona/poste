@@ -493,6 +493,9 @@ class UploadConsumoSerializer(serializers.ModelSerializer):
 class DetalleInventarioSerializer(serializers.ModelSerializer):
     material_descripcion = serializers.CharField(source='material.descripcion', read_only=True)
     material_matricula   = serializers.CharField(source='material.matricula',   read_only=True)
+    cantidad_fisica      = CantidadField()
+    cantidad_teorica     = CantidadField()
+    diferencia           = CantidadField(read_only=True, min_value=None)
     class Meta:
         model  = DetalleInventario
         fields = '__all__'
