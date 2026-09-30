@@ -52,7 +52,6 @@ TIPO_CON_VEREDA = "Reforzamiento con vereda"
 PARTIDAS_NUEVAS = {
     "*090251": ("REFORZAMIENTO CON VEREDA", Decimal("467.52")),
     "*095275": ("REPARACION DE VEREDA DE 15CM M2", PRECIO_DE_PASO),
-    "*095280": ("REPARACION DE VEREDA DE 20CM M2", Decimal("140.00")),
     "*091845": ("ROTURA DE VEREDA CON MAQUINA", Decimal("33.35")),
     "*094919": ("CIMENTACION COMPLEMENTARIA", Decimal("56.35")),
     "*091830": ("ROTURA DE PISTA CUALQUIER ESPESOR", Decimal("54.04")),
@@ -61,6 +60,14 @@ PARTIDAS_NUEVAS = {
     "*099090": ("ROTULACION DE PAT", Decimal("29.30")),
     "*091673": ("COLOC.TUBO PVC.A POSTE P/PUNTO DE ALIMENTACION "
                 "(FLEJADO DE SUBIDA)", Decimal("28.00")),
+}
+
+# Partidas con precio pactado: se crean si faltan y, si alguien las cambió,
+# se corrigen en cada despliegue.
+PRECIOS_FIJOS = {
+    # Nació a 140.00 como "REPARACION DE VEREDA DE 20CM M2"; el usuario la
+    # corrigió el 2026-09-29.
+    "*095280": ("REPARACION DE VEREDA O PISTA 20CM", Decimal("180.00")),
 }
 
 # Las chaquetas de refuerzo. Se liquida una sola por SST: la regla de la app
@@ -153,6 +160,17 @@ class Command(BaseCommand):
                 defaults={"descripcion": descripcion, "precio": precio})
             if nueva:
                 self.stdout.write(f"  Partida creada a {precio}: {codigo}")
+
+        for codigo, (descripcion, precio) in PRECIOS_FIJOS.items():
+            partida, nueva = ManoDeObra.objects.get_or_create(
+                partida=codigo,
+                defaults={"descripcion": descripcion, "precio": precio})
+            if nueva:
+                self.stdout.write(f"  Partida creada a {precio}: {codigo}")
+            elif partida.precio != precio or partida.descripcion != descripcion:
+                partida.precio, partida.descripcion = precio, descripcion
+                partida.save(update_fields=["precio", "descripcion"])
+                self.stdout.write(f"  {codigo} corregida: {descripcion} a {precio}")
 
         tipo, creado = TipoTrabajo.objects.get_or_create(nombre=TIPO_CON_VEREDA)
         if creado:
