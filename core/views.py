@@ -214,6 +214,13 @@ def lineas_de_ingreso(filas):
             'sin_cantidad': sin_cantidad}
 
 
+def fmt_cantidad(valor, signo=False):
+    """Una cantidad como se lee en obra: 4, 2.5, 1.25; con signo, +2.5 o -1."""
+    valor = Decimal(valor).quantize(Decimal('0.01')).normalize()
+    texto = f'{valor:f}'
+    return f'+{texto}' if signo and valor > 0 else texto
+
+
 def solo_propios(qs, request, puede_aprobar):
     """Pedidos o devoluciones que le tocan a quien consulta.
 
@@ -1762,8 +1769,11 @@ class InventarioViewSet(viewsets.ModelViewSet):
                             diferencia=0,
                         )
                     else:
+                        # update() no pasa por save(): la diferencia se
+                        # recalcula aquí o queda la del teórico viejo.
                         existente.detalles.filter(material_id=sc.material_id).update(
-                            cantidad_teorica=sc.cantidad)
+                            cantidad_teorica=sc.cantidad,
+                            diferencia=models.F('cantidad_fisica') - sc.cantidad)
             existente.refresh_from_db()
             existente = (Inventario.objects
                          .prefetch_related('detalles__material')
@@ -1800,10 +1810,22 @@ class InventarioViewSet(viewsets.ModelViewSet):
                 try:
                     det = DetalleInventario.objects.get(
                         pk=d['id_detalle_inventario'], inventario=inventario)
-                    det.cantidad_fisica = d.get('cantidad_fisica', det.cantidad_fisica)
-                    det.save()
                 except DetalleInventario.DoesNotExist:
-                    pass
+                    continue
+                if d.get('cantidad_fisica') is None:
+                    continue
+                # Como texto: un 2.5 que llega como float no se resta con el
+                # teórico, que es Decimal.
+                try:
+                    fisica = Decimal(str(d['cantidad_fisica']).replace(',', '.'))
+                except ArithmeticError:
+                    fisica = None
+                if fisica is None or not fisica.is_finite() or fisica < 0:
+                    raise ErrorNegocio(
+                        f'Cantidad inválida para {det.material.matricula}: '
+                        f'{d["cantidad_fisica"]}.')
+                det.cantidad_fisica = fisica.quantize(Decimal('0.01'))
+                det.save()
         inventario = (Inventario.objects
                       .prefetch_related('detalles__material')
                       .get(pk=inventario.pk))
@@ -1850,7 +1872,8 @@ class InventarioViewSet(viewsets.ModelViewSet):
                 diffs = [d for d in inventario.detalles.all() if d.diferencia != 0]
                 if diffs:
                     lineas = ', '.join(
-                        f'{d.material.matricula}: {d.diferencia:+d}' for d in diffs[:5]
+                        f'{d.material.matricula}: {fmt_cantidad(d.diferencia, signo=True)}'
+                        for d in diffs[:5]
                     )
                     if len(diffs) > 5:
                         lineas += f' y {len(diffs)-5} más'

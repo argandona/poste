@@ -25,6 +25,12 @@ MESES = [
 ]
 
 
+def _cantidad(valor, signo=False):
+    """4 y no 4.00; 2.5 y no 2.50."""
+    from .views import fmt_cantidad
+    return fmt_cantidad(valor, signo=signo)
+
+
 def _estilos():
     ss = getSampleStyleSheet()
     return {
@@ -173,10 +179,10 @@ def generar_pdf_inventario(inventario, encargado_camion=None) -> bytes:
 
         if dif > 0:
             dif_color = colors.HexColor('#1565C0')   # azul (sobrante)
-            dif_str   = f'+{dif}'
+            dif_str   = _cantidad(dif, signo=True)
         elif dif < 0:
             dif_color = colors.HexColor('#B71C1C')   # rojo (faltante)
-            dif_str   = str(dif)
+            dif_str   = _cantidad(dif)
         else:
             dif_color = colors.HexColor('#388E3C')   # verde (ok)
             dif_str   = '0'
@@ -188,8 +194,8 @@ def generar_pdf_inventario(inventario, encargado_camion=None) -> bytes:
             Paragraph(str(i),               td_num),
             Paragraph(d.material.matricula, td_style),
             Paragraph(d.material.descripcion, td_style),
-            Paragraph(str(d.cantidad_teorica), td_num),
-            Paragraph(str(d.cantidad_fisica),  td_num),
+            Paragraph(_cantidad(d.cantidad_teorica), td_num),
+            Paragraph(_cantidad(d.cantidad_fisica),  td_num),
             Paragraph(dif_str,                 td_dif),
         ])
 
