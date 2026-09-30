@@ -221,6 +221,10 @@ def fmt_cantidad(valor, signo=False):
     return f'+{texto}' if signo and valor > 0 else texto
 
 
+# El "departamento" del formato de recupero TS-REC-FR-001.
+DEPARTAMENTO_DEL_RECUPERO = 'Mantenimiento'
+
+
 def solo_propios(qs, request, puede_aprobar):
     """Pedidos o devoluciones que le tocan a quien consulta.
 
@@ -2052,7 +2056,9 @@ class RecuperoViewSet(viewsets.ModelViewSet):
         pdf = generar_pdf_recupero({
             'sst': sst.codigo or sst.sst,
             'fecha': fecha_larga(sst.fecha_ejecucion),
-            'departamento': sst.distrito or '',
+            # El área de Tecsur que recibe el recupero, no un lugar: siempre
+            # Mantenimiento (pedido del usuario el 2026-09-29).
+            'departamento': DEPARTAMENTO_DEL_RECUPERO,
             'contratista': sst.empresa.nombre if sst.empresa_id else '',
             'reportado_por': actor.nombre if actor else '',
             'capataz': capataz.nombre if capataz else '',
