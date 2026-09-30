@@ -52,7 +52,6 @@ TIPO_CON_VEREDA = "Reforzamiento con vereda"
 PARTIDAS_NUEVAS = {
     "*090251": ("REFORZAMIENTO CON VEREDA", Decimal("467.52")),
     "*095275": ("REPARACION DE VEREDA DE 15CM M2", PRECIO_DE_PASO),
-    "*091845": ("ROTURA DE VEREDA CON MAQUINA", Decimal("33.35")),
     "*094919": ("CIMENTACION COMPLEMENTARIA", Decimal("56.35")),
     "*091830": ("ROTURA DE PISTA CUALQUIER ESPESOR", Decimal("54.04")),
     "*095230": ("REPARACION DE ASFALTO M2", Decimal("122.42")),
@@ -68,6 +67,8 @@ PRECIOS_FIJOS = {
     # Nació a 140.00 como "REPARACION DE VEREDA DE 20CM M2"; el usuario la
     # corrigió el 2026-09-29.
     "*095280": ("REPARACION DE VEREDA O PISTA 20CM", Decimal("180.00")),
+    # Nació a 33.35 como "ROTURA DE VEREDA CON MAQUINA"; corregida el mismo día.
+    "*091845": ("ROTURA DE VEREDA CON MAQUINA CORTADORA EN M2", Decimal("31.82")),
 }
 
 # Las chaquetas de refuerzo. Se liquida una sola por SST: la regla de la app
