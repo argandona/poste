@@ -28,8 +28,14 @@ class CargarRecuperosTests(BaseAPITestCase):
                 .values_list("unidad", flat=True)),
             {"M"})
 
-    def test_el_poste_de_fibra_entra_por_unidad(self):
+    def test_los_postes_de_fibra_van_por_medida_y_por_unidad(self):
+        # REC-051 era "POSTE DE FIBRA" a secas; desde el 2026-09-29 es el de
+        # 7 m, y se suman el de 8 y el de 9.
+        Recupero.objects.create(matricula="REC-051", descripcion="POSTE DE FIBRA")
         call_command("cargar_recuperos", verbosity=0)
-        poste = Recupero.objects.get(matricula="REC-051")
-        self.assertEqual(poste.descripcion, "POSTE DE FIBRA")
-        self.assertEqual(poste.unidad, "UND")
+        for matricula, descripcion in (("REC-051", "POSTE DE FIBRA DE 7"),
+                                       ("REC-052", "POSTE DE FIBRA DE 8"),
+                                       ("REC-053", "POSTE DE FIBRA DE 9")):
+            poste = Recupero.objects.get(matricula=matricula)
+            self.assertEqual(poste.descripcion, descripcion)
+            self.assertEqual(poste.unidad, "UND")

@@ -13,7 +13,7 @@ cantidades liquidadas sin descontar nada y cobraba de más. Ahora los dos leen
 de aquí.
 """
 import unicodedata
-from decimal import Decimal
+from decimal import ROUND_FLOOR, Decimal
 
 
 def norm_actividad(nombre):
@@ -87,6 +87,21 @@ INCLUSIONES_CONSOLIDADO = {
     },
 }
 
+# Aéreo viento (2026-09-29): cada poste PRFV instalado trae 100 de acarreo, 100
+# de arrastre y una cimentación. La *090482 suma además 0.67 con poste
+# provisional, que no es un poste instalado: 'solo_enteros' cuenta la parte
+# entera del paquete, y el provisional (una pregunta de sí o no) nunca llega a
+# uno.
+INCLUSIONES_CONSOLIDADO['cambio de poste inaccesible aereo - viento'] = {
+    'paquete': ['*090482'],
+    'solo_enteros': True,
+    'incluidos': {
+        '*090633': 100,   # acarreo de materiales para cimentación
+        '*090634': 100,   # traslado manual: el arrastre del plano
+        '*094918': 1,     # cimentación para poste hasta 9 m
+    },
+}
+
 # La actividad subterránea se renombró el 2026-09-20 a "Cambio de poste inacc.
 # cabria subterraneo". Sus descuentos de "lo ya incluido" son los mismos: el
 # poste sigue siendo el suyo, solo cambió el nombre. Valen los dos mientras
@@ -125,6 +140,8 @@ def consolidar_partidas(postes, reglas, buscar_partida):
             for codigo in regla['paquete']:
                 if codigo in partidas:
                     num += partidas[codigo]['cantidad']
+            if regla.get('solo_enteros'):
+                num = num.to_integral_value(rounding=ROUND_FLOOR)
         cambios += num
 
         for codigo, info in partidas.items():

@@ -12,8 +12,9 @@ no se retiran. Las reglas que lo llenan están en la app.
 
 El resto de sus tipos, en el orden de la obra (decidido el 2026-09-29):
 
-- "Poste viento", primero y vacío: su composición se definirá después, así
-  que el comando lo crea y lo cuelga pero no le toca el catálogo.
+- "Poste viento", primero, con su catálogo (definido el 2026-09-29): los
+  dos postes PRFV, el fleje y la hebilla, y sus partidas en el orden de la
+  obra. Las reglas que las llenan están en la app.
 - Copias de cabria con nombre propio: "Alumbrado aereo viento", "Ferreteria
   viento" y "Conexiones viento". Nacen y se mantienen con el catálogo de su
   original en `configurar_cabria`; las reglas de la app son las mismas.
@@ -37,6 +38,39 @@ from .configurar_cabria import Command as ConfigurarCabria
 NOMBRE = "Cambio de poste inaccesible aereo - Viento"
 
 POSTE = "Poste viento"
+
+# El poste: materiales y partidas con su cantidad inicial. La inspección va
+# siempre; lo demás lo calcula la app o se escribe a mano.
+CATALOGO_DEL_POSTE = {
+    "materiales": {
+        "5331596": 0,  # poste PRFV 7,5 m
+        "5331616": 0,  # poste PRFV 9 m
+        "1014213": 0,  # fleje 3/4"
+        "1014308": 0,  # grapa hebilla 3/4
+    },
+    "mano_de_obra": {
+        "*094395": 1,  # inspección previa: siempre
+        "*090248": 0,  # trípode: se pregunta
+        "*090482": 0,  # instalación PRFV = 1 con poste, + 0.67 con provisional
+        "*090468": 0,  # retiro PRFV = 0.67 con provisional
+        "*090636": 0,  # disposición final = postes del recupero
+        "*091797": 0,  # apertura de hoyo, terreno normal: se pregunta
+        "*091796": 0,  # apertura de hoyo, terreno rocoso: se pregunta
+        "*090634": 0,  # traslado manual = arrastre del plano
+        "*090633": 0,  # acarreo: a mano
+        "*094913": 0,  # punta de diamante: a mano
+        "*094918": 0,  # cimentación: a mano
+        "*098203": 0,  # tubo corrugado: a mano
+        "*094911": 0,  # solera: a mano
+        "*091840": 0,  # rotura de vereda = m² del plano, hasta 2
+        "*091845": 0,  # rotura con máquina = lo que pase de 2 m²
+        "*091842": 0,  # corte de vereda: se pregunta, = la rotura
+        "*095266": 0,  # reparación de vereda 10 cm = paños del plano
+        "*095280": 0,  # reparación de vereda 20 cm = paños del plano
+        "*010250": 0,  # martillo demoledor: se pregunta con el grupo
+        "*010251": 0,  # grupo electrógeno: se pregunta con el martillo
+    },
+}
 
 # Copia en viento -> el tipo de cabria del que sale.
 COPIAS = {
@@ -65,7 +99,7 @@ ORDEN_DE_LOS_RETIROS = 100
 # Lo que viento retira y cabria no, con su cantidad inicial. Van después de
 # las de cabria.
 PARTIDAS_PROPIAS = {
-    "*090468": 0,  # retiro de poste PRFV hasta 8.7 m <- poste de fibra (REC-051)
+    "*090468": 0,  # retiro de poste PRFV hasta 8.7 m <- postes de fibra de 7, 8 y 9 (REC-051 a 053)
 }
 
 
@@ -95,7 +129,8 @@ class Command(BaseCommand):
         cabria = ConfigurarCabria(stdout=self.stdout, stderr=self.stderr)
         # El poste va primero, con el orden 0 que también traen los que se
         # agregan desde Configuración; los demás, detrás en el orden de la obra.
-        self._colgar(actividad, POSTE, 0)
+        poste = self._colgar(actividad, POSTE, 0)
+        cabria._catalogo(poste, CATALOGO_DEL_POSTE)
         orden = 1
         for copia, original in COPIAS.items():
             tipo = self._colgar(actividad, copia, orden)
