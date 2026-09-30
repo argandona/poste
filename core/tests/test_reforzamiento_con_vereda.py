@@ -77,7 +77,7 @@ class ReforzamientoConVeredaTests(BaseAPITestCase):
         precio = lambda c: ManoDeObra.objects.get(partida=c).precio
         self.assertEqual(precio("*090251"), Decimal("467.52"))
         self.assertEqual(precio("*095280"), Decimal("180.00"))
-        self.assertEqual(precio("*091845"), Decimal("33.35"))
+        self.assertEqual(precio("*091845"), Decimal("31.82"))
         self.assertEqual(precio("*095230"), Decimal("122.42"))
         # Sin precio dado: provisional, para cargarlo desde Configuración.
         self.assertEqual(precio("*095275"), Decimal("1.00"))
@@ -89,6 +89,15 @@ class ReforzamientoConVeredaTests(BaseAPITestCase):
         partida = ManoDeObra.objects.get(partida="*095280")
         self.assertEqual(partida.precio, Decimal("180.00"))
         self.assertEqual(partida.descripcion, "REPARACION DE VEREDA O PISTA 20CM")
+
+    def test_la_rotura_con_maquina_se_corrige_a_31_82(self):
+        ManoDeObra.objects.create(partida="*091845", precio="33.35",
+                                  descripcion="ROTURA DE VEREDA CON MAQUINA")
+        self.configurar()
+        partida = ManoDeObra.objects.get(partida="*091845")
+        self.assertEqual(partida.precio, Decimal("31.82"))
+        self.assertEqual(partida.descripcion,
+                         "ROTURA DE VEREDA CON MAQUINA CORTADORA EN M2")
 
     def test_lleva_los_siete_refuerzos(self):
         tipo = self.configurar()

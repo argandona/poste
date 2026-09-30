@@ -19,6 +19,9 @@ from core.models import ManoDeObra
 PARTIDAS_DE_SST = [
     '*095266',   # reparación de vereda      = área de los paños del plano
     '*091840',   # rotura de vereda          = va con la reparación
+    '*095280',   # reparación de vereda 20 cm = paños de 20 cm del plano
+    '*091845',   # rotura con máquina        = la vereda pasados los 2 m²
+    '*091842',   # corte de vereda           = va con la rotura
     '*090630',   # arrastre en plano         = tramos del plano
     '*090632',   # arrastre en pendiente     = tramos del plano
     '*090634',   # traslado manual           = lo que el arrastre pasa de 100
