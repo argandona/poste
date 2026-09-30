@@ -65,6 +65,7 @@ DESCRIPCIONES_MANO_DE_OBRA = {
 # Nombres de obra con los que el capataz reconoce el material. Reemplazan a la
 # descripción larga del catálogo, que en dos pastorales era idéntica.
 DESCRIPCIONES = {
+    "1014308": "GRAPA HEBILLA 3/4",  # pedido del usuario el 2026-09-29
     "5021407": "CONDUCTOR SOLIDO TWT 450/750V.BIPOLAR 2X1.5 MM2 (INDOPRENE)",
     "5347015": "PASTORAL BASTON",
     "5347095": "PASTORAL JP",

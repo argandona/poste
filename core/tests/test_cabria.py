@@ -191,6 +191,14 @@ class ConfigurarCabriaTests(BaseAPITestCase):
             ManoDeObra.objects.get(partida="*010213").descripcion,
             "TRASLADO DE CABLES DE COMUNICACION")
 
+    def test_la_hebilla_se_llama_grapa_hebilla(self):
+        Material.objects.create(
+            matricula="1014308", precio="1.00",
+            descripcion="GRAPA (HEBILLA) AC. INOX. P.FLEJE 19MM. ANCHO")
+        call_command("configurar_tipos_viento", verbosity=0)
+        self.assertEqual(Material.objects.get(matricula="1014308").descripcion,
+                         "GRAPA HEBILLA 3/4")
+
     def test_correr_dos_veces_deja_el_mismo_precio(self):
         call_command("configurar_cabria", verbosity=0)
         call_command("configurar_cabria", verbosity=0)
