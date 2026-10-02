@@ -973,3 +973,38 @@ class PlanoSST(models.Model):
         unique_together = (("empresa", "sst_codigo"),)
     def __str__(self):
         return f"Plano SST {self.sst_codigo} ({len(self.elementos)} elementos)"
+
+
+class AsignacionAgregado(models.Model):
+    """Bolsas de un agregado (el cemento) que salen del almacén al camión sin
+    pasar por un pedido.
+
+    Se registran por los dos lados: el encargado de almacén las entrega, o el
+    capataz o encargado anota temprano lo que se llevó. Ninguna espera
+    aprobación: impactan al momento en los dos stocks. El control es que el
+    almacén ve cada una y puede anularla, y entonces las bolsas vuelven."""
+    ORIGEN_ALMACEN = "almacen"
+    ORIGEN_CAMION = "camion"
+    ORIGENES = [(ORIGEN_ALMACEN, "Desde almacén"), (ORIGEN_CAMION, "Desde el camión")]
+
+    id_asignacion  = models.AutoField(primary_key=True)
+    almacen        = models.ForeignKey(Almacen,  on_delete=models.PROTECT, related_name="asignaciones_agregado")
+    camion         = models.ForeignKey(Camion,   on_delete=models.PROTECT, related_name="asignaciones_agregado")
+    material       = models.ForeignKey(Material, on_delete=models.PROTECT, related_name="asignaciones_agregado")
+    cantidad       = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0)])
+    # Quien carga las bolsas en su camión, y quien lo anotó.
+    usuario        = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name="agregados_recibidos")
+    registrado_por = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name="agregados_registrados")
+    origen         = models.CharField(max_length=10, choices=ORIGENES)
+    fecha          = models.DateTimeField(auto_now_add=True)
+    observacion    = models.TextField(blank=True)
+    anulada        = models.BooleanField(default=False)
+    anulada_por    = models.ForeignKey(Usuario, on_delete=models.PROTECT, null=True, blank=True, related_name="agregados_anulados")
+    fecha_anulacion = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "asignacion_agregado"
+        ordering = ["-fecha", "-id_asignacion"]
+
+    def __str__(self):
+        return f"{self.material} x {self.cantidad} -> {self.camion}"
