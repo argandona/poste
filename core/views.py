@@ -2766,15 +2766,24 @@ class TipoTrabajoViewSet(viewsets.ModelViewSet):
 
 
 # ── Asignación de agregados ──────────────────────────────────────────────────
+class SoloAlmacen(permissions.BasePermission):
+    """El encargado de almacén y el SuperAdmin. Pedido del usuario el
+    2026-10-02: el capataz y el encargado no registran agregados."""
+    message = 'Solo el almacén asigna agregados.'
+
+    def has_permission(self, request, view):
+        id_usuario = getattr(request.user, 'id_usuario', None)
+        actor = Usuario.objects.filter(pk=id_usuario).first() if id_usuario else None
+        return bool(actor and actor.puede_gestionar_almacen())
+
+
 class AsignacionAgregadoViewSet(viewsets.ViewSet):
     """El cemento y los demás agregados salen del almacén al camión sin pedido.
 
-    Se registra por los dos lados y sin aprobación: el encargado de almacén
-    las entrega a un camión, o el capataz o encargado anota lo que se llevó
-    en el suyo. En los dos casos se descuenta del almacén y se suma al camión
-    en el acto. Lo que se anota desde el camión le avisa al almacén, que puede
-    anularlo y devolver las bolsas."""
-    permission_classes = [permissions.IsAuthenticated]
+    Solo los registra el almacén, y sin aprobación: elige el camión y las
+    bolsas se descuentan del almacén y se suman al camión en el acto. Si se
+    equivocó, anula y las bolsas vuelven."""
+    permission_classes = [permissions.IsAuthenticated, SoloAlmacen]
 
     @staticmethod
     def _actor(request):
@@ -2826,8 +2835,7 @@ class AsignacionAgregadoViewSet(viewsets.ViewSet):
     def list(self, request):
         """GET /api/asignaciones-agregado/?dia=AAAA-MM-DD
 
-        Las del día (hoy, si no se dice otro). El almacén ve todas; el capataz
-        o encargado, solo las suyas."""
+        Las del día (hoy, si no se dice otro), de los almacenes del actor."""
         actor = self._actor(request)
         if actor is None:
             raise ErrorNegocio('Usuario no encontrado.')
@@ -2836,11 +2844,8 @@ class AsignacionAgregadoViewSet(viewsets.ViewSet):
                 request.query_params.get('dia') or str(timezone.localdate()))
         except ValueError:
             raise ErrorNegocio('La fecha debe ser AAAA-MM-DD.')
-        qs = self._con_todo(AsignacionAgregado.objects.filter(fecha__date=dia))
-        if actor.puede_gestionar_almacen():
-            qs = qs.filter(almacen__in=self._almacenes(actor))
-        else:
-            qs = qs.filter(usuario=actor)
+        qs = self._con_todo(AsignacionAgregado.objects.filter(
+            fecha__date=dia, almacen__in=self._almacenes(actor)))
         return Response([self._datos(a) for a in qs])
 
     @action(detail=False, methods=['get'])
@@ -2848,8 +2853,7 @@ class AsignacionAgregadoViewSet(viewsets.ViewSet):
         """GET /api/asignaciones-agregado/opciones/
 
         Lo que hace falta para el formulario: los agregados con su saldo en
-        cada almacén y, según quién pregunte, los camiones con responsable
-        (almacén) o el camión propio (capataz o encargado)."""
+        cada almacén y los camiones con responsable."""
         actor = self._actor(request)
         if actor is None:
             raise ErrorNegocio('Usuario no encontrado.')
@@ -2862,7 +2866,6 @@ class AsignacionAgregadoViewSet(viewsets.ViewSet):
                 almacen__in=almacenes, material__in=agregados)
         }
         datos = {
-            'es_almacen': actor.puede_gestionar_almacen(),
             'almacenes': [{'id_almacen': a.pk, 'nombre': a.nombre}
                           for a in almacenes],
             'agregados': [{
@@ -2873,37 +2876,26 @@ class AsignacionAgregadoViewSet(viewsets.ViewSet):
                            for a in almacenes},
             } for m in agregados],
         }
-        if actor.puede_gestionar_almacen():
-            vistos = set()
-            camiones = []
-            for r in self._responsables_vigentes().order_by('camion__placa'):
-                if r.camion_id in vistos:
-                    continue
-                if (not actor.es_superadmin()
-                        and r.camion.empresa_id != actor.empresa_id):
-                    continue
-                vistos.add(r.camion_id)
-                camiones.append({'id_camion': r.camion_id,
-                                 'placa': r.camion.placa,
-                                 'usuario': r.usuario_id,
-                                 'usuario_nombre': r.usuario.nombre})
-            datos['camiones'] = camiones
-        else:
-            camion = UsuarioCamion.camion_activo_de_usuario(actor)
-            datos['mi_camion'] = ({'id_camion': camion.pk, 'placa': camion.placa}
-                                  if camion else None)
+        vistos = set()
+        camiones = []
+        for r in self._responsables_vigentes().order_by('camion__placa'):
+            if r.camion_id in vistos:
+                continue
+            if (not actor.es_superadmin()
+                    and r.camion.empresa_id != actor.empresa_id):
+                continue
+            vistos.add(r.camion_id)
+            camiones.append({'id_camion': r.camion_id,
+                             'placa': r.camion.placa,
+                             'usuario': r.usuario_id,
+                             'usuario_nombre': r.usuario.nombre})
+        datos['camiones'] = camiones
         return Response(datos)
 
     def create(self, request):
         """POST /api/asignaciones-agregado/
-        Body: {material, cantidad, almacen?, camion? (solo almacén), observacion?}"""
+        Body: {material, cantidad, camion, almacen?, observacion?}"""
         actor = self._actor(request)
-        if actor is None:
-            raise ErrorNegocio('Usuario no encontrado.')
-        desde_almacen = actor.puede_gestionar_almacen()
-        if not desde_almacen and not actor.puede_hacer_pedido():
-            return Response({'detail': 'No puedes registrar agregados.'},
-                            status=403)
 
         material = Material.objects.filter(pk=request.data.get('material')).first()
         if material is None or not material.es_agregado:
@@ -2924,21 +2916,15 @@ class AsignacionAgregadoViewSet(viewsets.ViewSet):
         if almacen is None:
             raise ErrorNegocio('Elige de qué almacén salen.')
 
-        if desde_almacen:
-            camion = Camion.objects.filter(pk=request.data.get('camion')).first()
-            if camion is None:
-                raise ErrorNegocio('Elige el camión que las recibe.')
-            responsable = (self._responsables_vigentes()
-                           .filter(camion=camion).first())
-            if responsable is None:
-                raise ErrorNegocio(
-                    f'El camión {camion.placa} no tiene responsable.')
-            usuario = responsable.usuario
-        else:
-            camion = UsuarioCamion.camion_activo_de_usuario(actor)
-            if camion is None:
-                raise ErrorNegocio('No tienes un camión activo asignado.')
-            usuario = actor
+        camion = Camion.objects.filter(pk=request.data.get('camion')).first()
+        if camion is None:
+            raise ErrorNegocio('Elige el camión que las recibe.')
+        responsable = (self._responsables_vigentes()
+                       .filter(camion=camion).first())
+        if responsable is None:
+            raise ErrorNegocio(
+                f'El camión {camion.placa} no tiene responsable.')
+        usuario = responsable.usuario
 
         with transaction.atomic():
             stock = (StockAlmacen.objects.select_for_update()
@@ -2956,25 +2942,9 @@ class AsignacionAgregadoViewSet(viewsets.ViewSet):
             asignacion = AsignacionAgregado.objects.create(
                 almacen=almacen, camion=camion, material=material,
                 cantidad=cantidad, usuario=usuario, registrado_por=actor,
-                origen=(AsignacionAgregado.ORIGEN_ALMACEN if desde_almacen
-                        else AsignacionAgregado.ORIGEN_CAMION),
+                origen=AsignacionAgregado.ORIGEN_ALMACEN,
                 observacion=(request.data.get('observacion') or '').strip())
 
-        if not desde_almacen:
-            from .fcm import send_notification
-            tokens = list(
-                Usuario.objects.filter(con_rol(*ROLES_QUE_APRUEBAN),
-                                       empresa_id=actor.empresa_id, activo=True)
-                .exclude(fcm_token__isnull=True).exclude(fcm_token='')
-                .values_list('fcm_token', flat=True))
-            send_notification(
-                tokens,
-                title='Agregado registrado desde el camión',
-                body=(f'{actor.nombre} se llevó {cantidad.normalize():f} de '
-                      f'{material.descripcion} en el camión {camion.placa}.'),
-                data={'tipo': 'agregado_registrado',
-                      'asignacion_id': str(asignacion.pk)},
-            )
         asignacion = self._con_todo(AsignacionAgregado.objects).get(pk=asignacion.pk)
         return Response(self._datos(asignacion), status=201)
 
@@ -2985,9 +2955,6 @@ class AsignacionAgregadoViewSet(viewsets.ViewSet):
         Solo el almacén. Las bolsas vuelven del camión al almacén; si el camión
         ya las gastó, no se puede."""
         actor = self._actor(request)
-        if actor is None or not actor.puede_gestionar_almacen():
-            return Response({'detail': 'Solo el almacén puede anular.'},
-                            status=403)
         with transaction.atomic():
             asignacion = (AsignacionAgregado.objects.select_for_update()
                           .filter(pk=pk, almacen__in=self._almacenes(actor))
