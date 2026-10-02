@@ -1,5 +1,5 @@
 """Crea las dos actividades de reforzamiento de poste, que son de encargado,
-el cemento que usan y el tipo de trabajo de la que lleva vereda.
+el cemento que usan y el tipo de trabajo de cada una.
 
 Un encargado solo ve las actividades de encargado, y estas son las suyas; el
 capataz no las ve.
@@ -18,6 +18,9 @@ Nada de lo que ya existe se pisa: lo corregido desde Configuración sobrevive
 al próximo despliegue. Lo único que se deja exacto es el conjunto de partidas
 y materiales del tipo de trabajo.
 
+"Reforzamiento sin vereda" es el de la otra actividad: lleva el mismo
+material, y en lugar de vereda, pista y asfalto se mide piso especial y grass.
+
 Es idempotente. Lo corre el script de despliegue en cada build.
 """
 from decimal import Decimal
@@ -32,10 +35,9 @@ from .configurar_cabria import Command as ConfigurarCabria
 
 CON_VEREDA = "Reforzamiento de poste con vereda"
 
-ACTIVIDADES = [
-    CON_VEREDA,
-    "Reforzamiento de poste sin vereda / piso especial",
-]
+SIN_VEREDA = "Reforzamiento de poste sin vereda / piso especial"
+
+ACTIVIDADES = [CON_VEREDA, SIN_VEREDA]
 
 PRECIO_DE_PASO = Decimal("1.00")
 
@@ -46,6 +48,7 @@ CEMENTO = {
 }
 
 TIPO_CON_VEREDA = "Reforzamiento con vereda"
+TIPO_SIN_VEREDA = "Reforzamiento sin vereda"
 
 # Las partidas que no estaban en el catálogo, con el precio que dio el
 # usuario el 2026-09-28.
@@ -59,6 +62,16 @@ PARTIDAS_NUEVAS = {
     "*099090": ("ROTULACION DE PAT", Decimal("29.30")),
     "*091673": ("COLOC.TUBO PVC.A POSTE P/PUNTO DE ALIMENTACION "
                 "(FLEJADO DE SUBIDA)", Decimal("28.00")),
+}
+
+# Las del reforzamiento sin vereda que no estaban en el catálogo, con el
+# precio que dio el usuario el 2026-10-02. Las que no lo tenían, a
+# PRECIO_DE_PASO.
+PARTIDAS_SIN_VEREDA = {
+    "*090252": ("REFORZAMIENTO SIN VEREDA", Decimal("405.35")),
+    "*091800": ("REPARACION DE PISO ESPECIAL M2", PRECIO_DE_PASO),
+    "*091810": ("REPOSICION DE GRASS M2", Decimal("80.51")),
+    "*020000": ("REPOSICION DE PISOS ESPECIALES M2", PRECIO_DE_PASO),
 }
 
 # Partidas con precio pactado: se crean si faltan y, si alguien las cambió,
@@ -116,10 +129,30 @@ CATALOGO_CON_VEREDA = {
     },
 }
 
+# El de la actividad sin vereda, con el mismo material. El reforzamiento es
+# uno; lo demás se pregunta o se calcula en la app.
+CATALOGO_SIN_VEREDA = {
+    "materiales": CATALOGO_CON_VEREDA["materiales"],
+    "mano_de_obra": {
+        "*094395": 1,  # inspección previa: siempre
+        "*090248": 0,  # trípode: se pregunta
+        "*090252": 1,  # reforzamiento sin vereda
+        "*094919": 0,  # cimentación complementaria: se pregunta
+        "*091800": 0,  # reparación de piso especial = m² de sus paños
+        "*091810": 0,  # reposición de grass = m² de sus paños
+        "*098203": 0,  # tubo corrugado: se pregunta
+        "*098822": 0,  # rotura de cimentación: se pregunta
+        "*090633": 0,  # acarreo = metros por viajes
+        "*099090": 0,  # rotulación de PAT: se pregunta
+        "*091673": 0,  # flejado de subida: se pregunta
+        "*020000": 0,  # reposición de piso = 1 si se compró
+    },
+}
+
 
 class Command(BaseCommand):
     help = ("Crea las actividades de reforzamiento de poste, el cemento y "
-            f"«{TIPO_CON_VEREDA}».")
+            f"«{TIPO_CON_VEREDA}» y «{TIPO_SIN_VEREDA}».")
 
     @transaction.atomic
     def handle(self, *args, **options):
@@ -155,7 +188,8 @@ class Command(BaseCommand):
                 self.stdout.write(
                     f"  Material creado a {PRECIO_DE_PASO}: {matricula}")
 
-        for codigo, (descripcion, precio) in PARTIDAS_NUEVAS.items():
+        for codigo, (descripcion, precio) in {**PARTIDAS_NUEVAS,
+                                              **PARTIDAS_SIN_VEREDA}.items():
             _, nueva = ManoDeObra.objects.get_or_create(
                 partida=codigo,
                 defaults={"descripcion": descripcion, "precio": precio})
@@ -173,13 +207,17 @@ class Command(BaseCommand):
                 partida.save(update_fields=["precio", "descripcion"])
                 self.stdout.write(f"  {codigo} corregida: {descripcion} a {precio}")
 
-        tipo, creado = TipoTrabajo.objects.get_or_create(nombre=TIPO_CON_VEREDA)
+        self._tipo(TIPO_CON_VEREDA, CATALOGO_CON_VEREDA, CON_VEREDA)
+        self._tipo(TIPO_SIN_VEREDA, CATALOGO_SIN_VEREDA, SIN_VEREDA)
+
+    def _tipo(self, nombre, catalogo, actividad):
+        tipo, creado = TipoTrabajo.objects.get_or_create(nombre=nombre)
         if creado:
-            self.stdout.write(f"  Tipo de trabajo creado: «{TIPO_CON_VEREDA}».")
+            self.stdout.write(f"  Tipo de trabajo creado: «{nombre}».")
         ConfigurarCabria(stdout=self.stdout, stderr=self.stderr)._catalogo(
-            tipo, CATALOGO_CON_VEREDA)
+            tipo, catalogo)
         _, vinculado = ActividadTipoTrabajo.objects.get_or_create(
-            actividad=Actividad.objects.get(nombre=CON_VEREDA),
+            actividad=Actividad.objects.get(nombre=actividad),
             tipo_trabajo=tipo)
         if vinculado:
-            self.stdout.write(f"  + {TIPO_CON_VEREDA}")
+            self.stdout.write(f"  + {nombre}")
