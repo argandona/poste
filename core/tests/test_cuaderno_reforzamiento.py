@@ -8,7 +8,8 @@ con lo de siempre.
 from datetime import date
 from unittest import mock
 
-from ..cuaderno_reforzamiento import (en_renglones, generar_pdf_reforzamiento,
+from ..cuaderno_reforzamiento import (VACIO, _casilla, _subrayado,
+                                      en_renglones, generar_pdf_reforzamiento,
                                       reunir_reforzamiento)
 from ..models import (SST, Actividad, ConsumoMaterialSuministro,
                       LiquidacionPartida, LiquidacionSuministro, ManoDeObra,
@@ -103,6 +104,18 @@ class CuadernoReforzamientoTests(BaseAPITestCase):
         self.assertEqual(en_renglones(['a', 'b', 'c', 'd'], 3),
                          ['a', 'b', 'c; d'])
         self.assertEqual(en_renglones(['a'], 3), ['a', '', ''])
+
+    def test_lo_vacio_se_escribe_con_una_rayita(self):
+        c = mock.MagicMock()
+        _casilla(c, 0, 0, '')
+        c.drawCentredString.assert_called_once_with(mock.ANY, 0, VACIO)
+        c = mock.MagicMock()
+        _subrayado(c, 0, 0, '', 100)
+        c.drawString.assert_called_once_with(mock.ANY, 0, VACIO)
+        c = mock.MagicMock()
+        _casilla(c, 0, 0, '8,7 / 200')
+        c.drawCentredString.assert_called_once_with(mock.ANY, 0, '8,7 / 200')
+        self.assertEqual(VACIO, '-')
 
     def test_sin_respuesta_la_casilla_queda_vacia(self):
         self.liquidar()

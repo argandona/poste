@@ -203,6 +203,9 @@ _COL2 = _ANCHO / 2 + 0.3 * cm
 _CASILLA = 2.9 * cm
 _ALTO_CASILLA = 0.5 * cm
 
+# Lo que se escribe donde no hay dato: el papel no queda en blanco.
+VACIO = '-'
+
 
 def _texto_que_entra(c, texto, ancho, fuente='Helvetica', tamano=9, minimo=5.5):
     """Achica la letra hasta que el texto entre en la casilla."""
@@ -212,12 +215,13 @@ def _texto_que_entra(c, texto, ancho, fuente='Helvetica', tamano=9, minimo=5.5):
 
 
 def _casilla(c, x, y, texto=''):
-    """Una casilla con su valor centrado. `y` es la base del renglón."""
+    """Una casilla con su valor centrado, o una rayita si no hay dato. `y`
+    es la base del renglón."""
     c.setLineWidth(0.8)
     c.rect(x, y - 0.12 * cm, _CASILLA, _ALTO_CASILLA)
-    if texto:
-        _texto_que_entra(c, texto, _CASILLA - 0.15 * cm)
-        c.drawCentredString(x + _CASILLA / 2, y, texto)
+    texto = texto or VACIO
+    _texto_que_entra(c, texto, _CASILLA - 0.15 * cm)
+    c.drawCentredString(x + _CASILLA / 2, y, texto)
 
 
 def _renglon(c, x_etiqueta, y, etiqueta, valor, ancho_columna):
@@ -229,9 +233,9 @@ def _renglon(c, x_etiqueta, y, etiqueta, valor, ancho_columna):
 def _subrayado(c, x, y, texto, ancho):
     c.setLineWidth(0.6)
     c.line(x, y - 0.1 * cm, x + ancho, y - 0.1 * cm)
-    if texto:
-        _texto_que_entra(c, texto, ancho - 0.1 * cm, tamano=10)
-        c.drawString(x + 0.05 * cm, y, texto)
+    texto = texto or VACIO
+    _texto_que_entra(c, texto, ancho - 0.1 * cm, tamano=10)
+    c.drawString(x + 0.05 * cm, y, texto)
 
 
 def _acarreo(c, x, y, ancho_columna, metros, viajes):
