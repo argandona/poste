@@ -2020,6 +2020,11 @@ class RecuperoViewSet(viewsets.ModelViewSet):
 
         # Los recuperos se cargan por poste; el formato es por SST, así que se
         # juntan todos y se suma la cantidad de cada material.
+        # El reforzamiento no retira nada: el formato sale con la tabla vacía
+        # y cruzado con "SIN RECUPERO".
+        from .cuaderno_reforzamiento import es_reforzamiento
+        sin_recupero = es_reforzamiento(sst)
+
         suministros = Suministro.objects.filter(sst_suministros__sst=sst)
         registros = (SuministroRecupero.objects
                      .filter(suministro__in=suministros)
@@ -2041,6 +2046,8 @@ class RecuperoViewSet(viewsets.ModelViewSet):
             'unidad': v['unidad'],
             'cantidad': (f"{v['total']:.2f}".rstrip('0').rstrip('.')),
         } for v in sumados.values()]
+        if sin_recupero:
+            items = []
 
         actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
         capataz = (Usuario.objects
@@ -2068,7 +2075,7 @@ class RecuperoViewSet(viewsets.ModelViewSet):
                 f'Firmado electrónicamente desde la app · '
                 f'{fecha_larga()} · usuario #{capataz.id_usuario}'
                 if capataz else 'Sin capataz asignado'),
-        }, items)
+        }, items, sin_recupero=sin_recupero)
 
         resp = HttpResponse(pdf, content_type='application/pdf')
         nombre = f'recupero_{sst.codigo or sst.sst}.pdf'
@@ -2221,6 +2228,21 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
 
         sst, datos = self._sst_liquidada(request)
         codigo = sst.codigo or sst.sst
+
+        # El reforzamiento de poste tiene su propio formato, de casillas.
+        from .cuaderno_reforzamiento import (
+            es_reforzamiento, generar_pdf_reforzamiento, reunir_reforzamiento)
+        if es_reforzamiento(sst):
+            hojas = reunir_reforzamiento(sst)
+            if not hojas:
+                raise ErrorNegocio(
+                    f'La SST {codigo} todavía no tiene reforzamiento liquidado.')
+            resp = HttpResponse(generar_pdf_reforzamiento(hojas),
+                                content_type='application/pdf')
+            resp['Content-Disposition'] = (
+                f'attachment; filename="cuaderno_obra_{codigo}.pdf"')
+            return resp
+
         cuaderno = CuadernoObra.objects.filter(
             empresa_id=sst.empresa_id, sst_codigo=codigo).first()
         while cuaderno is None:

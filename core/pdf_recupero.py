@@ -161,9 +161,22 @@ def _listado(items, es):
                ('BOTTOMPADDING', (0, 1), (-1, -1), 2)])
 
 
-def generar_pdf_recupero(datos, items):
+def _cruzar_sin_recupero(c, doc):
+    """Cruza la página con "SIN RECUPERO" en diagonal, grande y en gris para
+    que se lean debajo los renglones vacíos."""
+    c.saveState()
+    c.setFillColor(colors.HexColor('#9E9E9E'))
+    c.setFont('Helvetica-Bold', 64)
+    c.translate(A4[0] / 2, A4[1] / 2 - 1 * cm)
+    c.rotate(35)
+    c.drawCentredString(0, -22, 'SIN RECUPERO')
+    c.restoreState()
+
+
+def generar_pdf_recupero(datos, items, sin_recupero=False):
     """Arma el formato. `datos` trae el encabezado y la firma; `items`, los
-    recuperos ya sumados, cada uno con descripcion, unidad y cantidad."""
+    recuperos ya sumados, cada uno con descripcion, unidad y cantidad. Con
+    `sin_recupero` la tabla va vacía y cruzada: el trabajo no retiró nada."""
     buffer = io.BytesIO()
     margen = (A4[0] - ANCHO_TOTAL) / 2
     doc = SimpleDocTemplate(
@@ -173,6 +186,7 @@ def generar_pdf_recupero(datos, items):
         title=f'Registro de materiales de recupero {datos["sst"]}',
     )
     es = _estilos()
+    cruzar = _cruzar_sin_recupero if sin_recupero else (lambda c, d: None)
     doc.build([
         _cabecera(es),
         _datos(datos, es),
@@ -197,7 +211,7 @@ def generar_pdf_recupero(datos, items):
         Paragraph(datos['firma'], es['firma']),
         Paragraph('FIRMA CAPATAZ', es['firmaPie']),
         Paragraph(datos['firma_pie'], es['trazable']),
-    ])
+    ], onFirstPage=cruzar, onLaterPages=cruzar)
     return buffer.getvalue()
 
 
