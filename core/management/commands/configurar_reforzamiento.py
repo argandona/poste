@@ -54,7 +54,6 @@ TIPO_SIN_VEREDA = "Reforzamiento sin vereda"
 # usuario el 2026-09-28.
 PARTIDAS_NUEVAS = {
     "*090251": ("REFORZAMIENTO CON VEREDA", Decimal("467.52")),
-    "*095275": ("REPARACION DE VEREDA DE 15CM M2", PRECIO_DE_PASO),
     "*094919": ("CIMENTACION COMPLEMENTARIA", Decimal("56.35")),
     "*091830": ("ROTURA DE PISTA CUALQUIER ESPESOR", Decimal("54.04")),
     "*095230": ("REPARACION DE ASFALTO M2", Decimal("122.42")),
@@ -82,6 +81,9 @@ PRECIOS_FIJOS = {
     "*095280": ("REPARACION DE VEREDA O PISTA 20CM", Decimal("180.00")),
     # Nació a 33.35 como "ROTURA DE VEREDA CON MAQUINA"; corregida el mismo día.
     "*091845": ("ROTURA DE VEREDA CON MAQUINA CORTADORA EN M2", Decimal("31.82")),
+    # Nació a 1.00 provisional; el APU de Tecsur que pasó el usuario el
+    # 2026-10-02 la da a 125.27.
+    "*095275": ("REPARACION DE VEREDA DE 15CM M2", Decimal("125.27")),
 }
 
 # Las chaquetas de refuerzo. Se liquida una sola por SST: la regla de la app
@@ -108,7 +110,10 @@ MATERIALES_A_MANO = {
 # inspección va siempre y el reforzamiento es uno; lo demás se pregunta o se
 # calcula en la app. El orden es el que ve quien liquida.
 CATALOGO_CON_VEREDA = {
-    "materiales": {matricula: 0 for matricula in [*REFUERZOS, *MATERIALES_A_MANO]},
+    # El cemento lo calcula la app: los m² de vereda por el factor CAPECO de
+    # su espesor, más una bolsa por cimentación.
+    "materiales": {matricula: 0 for matricula in
+                   [*REFUERZOS, *MATERIALES_A_MANO, CEMENTO["matricula"]]},
     "mano_de_obra": {
         "*094395": 1,  # inspección previa: siempre
         "*090248": 0,  # trípode: se pregunta

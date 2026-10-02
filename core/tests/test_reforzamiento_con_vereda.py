@@ -79,8 +79,8 @@ class ReforzamientoConVeredaTests(BaseAPITestCase):
         self.assertEqual(precio("*095280"), Decimal("180.00"))
         self.assertEqual(precio("*091845"), Decimal("31.82"))
         self.assertEqual(precio("*095230"), Decimal("122.42"))
-        # Sin precio dado: provisional, para cargarlo desde Configuración.
-        self.assertEqual(precio("*095275"), Decimal("1.00"))
+        # El APU de Tecsur.
+        self.assertEqual(precio("*095275"), Decimal("125.27"))
 
     def test_la_reparacion_de_20cm_se_corrige_a_180(self):
         ManoDeObra.objects.create(partida="*095280", precio="140.00",
@@ -122,11 +122,11 @@ class ReforzamientoConVeredaTests(BaseAPITestCase):
 
     def test_no_pisa_lo_corregido_desde_configuracion(self):
         self.configurar()
-        ManoDeObra.objects.filter(partida="*095275").update(precio="131.00")
+        ManoDeObra.objects.filter(partida="*094919").update(precio="60.00")
         Material.objects.filter(matricula="6913290").update(precio="250.00")
         self.configurar()
-        self.assertEqual(ManoDeObra.objects.get(partida="*095275").precio,
-                         Decimal("131.00"))
+        self.assertEqual(ManoDeObra.objects.get(partida="*094919").precio,
+                         Decimal("60.00"))
         self.assertEqual(Material.objects.get(matricula="6913290").precio,
                          Decimal("250.00"))
 
@@ -134,7 +134,7 @@ class ReforzamientoConVeredaTests(BaseAPITestCase):
         self.configurar()
         tipo = self.configurar()
         self.assertEqual(tipo.partidas.count(), 16)
-        self.assertEqual(tipo.materiales.count(), 10)
+        self.assertEqual(tipo.materiales.count(), 11)
 
     # ── Las medidas viajan con la liquidación ────────────────────────────────
 

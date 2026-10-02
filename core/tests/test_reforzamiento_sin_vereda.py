@@ -77,7 +77,8 @@ class ReforzamientoSinVeredaTests(BaseAPITestCase):
         con_vereda = TipoTrabajo.objects.get(nombre="Reforzamiento con vereda")
         matriculas = lambda t: {m.material.matricula for m in t.materiales.all()}
         self.assertEqual(matriculas(tipo), matriculas(con_vereda))
-        self.assertEqual(tipo.materiales.count(), 10)
+        self.assertEqual(tipo.materiales.count(), 11)
+        self.assertIn("CEMENTO-425", matriculas(tipo))
 
     def test_no_pisa_el_precio_corregido(self):
         self.configurar()
