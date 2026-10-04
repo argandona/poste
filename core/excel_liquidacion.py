@@ -15,6 +15,10 @@ formatos y las demás hojas quedan como vienen.
   desde la columna I hacia la derecha. Lo instalado va en la fila 52 y lo
   trasladado en la 53, como las rotula la plantilla.
 - Vereda: largo y ancho de cada paño del plano, desde C5 y D5 hacia abajo.
+  Los paños que se miden al liquidar (el reforzamiento) van cada uno a su
+  bloque: vereda de 10 cm, de 15 cm, de 20 cm (en el de sardinel 20 cm, que
+  es el que suma a la reparación de 20 cm), pista, asfalto, piso especial y
+  grass.
 - Traslado - Acarreo: los tramos de arrastre del poste, uno por columna, en la
   fila 4 (lo ejecutado) y en la fila 5 (lo que se cobra, con el descuento de
   los 100 metros incluidos). El bloque de acarreo de abajo se llena solo: la
@@ -63,6 +67,24 @@ TRASLADO_DESCUENTO = 'K5'
 # Hoja Vereda: un paño por fila.
 VEREDA_PRIMERA, VEREDA_ULTIMA = 5, 218
 
+# Dónde va cada paño medido al liquidar, por la clave con que lo guarda la
+# app: (columna del largo, columna del ancho, primera fila, última fila).
+# La vereda de 20 cm no tiene bloque propio: va en "Sardinel 20cm", que es
+# el que la plantilla suma a la reparación de 20 cm (*095280) y a la rotura
+# de vereda (decisión del usuario, 2026-10-02).
+BLOQUES_DE_PANOS = {
+    'vereda_10':     ('C', 'D', 5, 46),
+    'vereda_20':     ('J', 'K', 5, 46),
+    'vereda_15':     ('C', 'D', 66, 70),
+    'pista':         ('C', 'D', 78, 86),
+    'asfalto':       ('J', 'K', 78, 86),
+    'piso_especial': ('C', 'D', 98, 104),
+    'grass':         ('C', 'D', 111, 118),
+}
+# La plantilla no trae la fórmula de m² en el primer renglón del piso especial
+# (Pe1): sin ella ese paño no sumaría.
+FORMULAS_FALTANTES = {('piso_especial', 98): ('F', '=+C98*D98')}
+
 
 def _clave(valor):
     """La matrícula como texto, venga como número (5331596.0) o como texto."""
@@ -88,7 +110,8 @@ def _hoja_carátula(wb):
 
 def generar_excel_liquidacion(encabezado, materiales, partidas,
                               elementos_plano=(), materiales_por_poste=(),
-                              partidas_por_poste=(), postes=()):
+                              partidas_por_poste=(), postes=(),
+                              panos_medidos=None):
     """`encabezado`: sst, actividad, distrito, fecha (date o None), contratista,
     capataz. `materiales` y `partidas`: listas de Item de cuaderno_obra, con el
     total de la SST. `elementos_plano`: lo guardado en el plano de la SST.
@@ -96,7 +119,10 @@ def generar_excel_liquidacion(encabezado, materiales, partidas,
     `materiales_por_poste` y `partidas_por_poste` son listas de listas de Item,
     una por punto de trabajo. Con uno solo no hacen falta: el total ya va en su
     columna. `postes` son sus números, en el mismo orden, para rotular las
-    columnas que la plantilla trae como P1, P2 y P3."""
+    columnas que la plantilla trae como P1, P2 y P3.
+
+    `panos_medidos`: los paños que se midieron al liquidar, por clave
+    (vereda_10, pista, piso_especial...), cada uno [largo, ancho]."""
     wb = load_workbook(PLANTILLA)
 
     car = _hoja_carátula(wb)
@@ -124,7 +150,8 @@ def generar_excel_liquidacion(encabezado, materiales, partidas,
     _rotular_postes(wb['MATERIAL'], MAT_ENCABEZADO, mat_columnas, postes)
     _rotular_postes(wb['MANO DE OBRA'], MO_ENCABEZADO, mo_columnas, postes)
     _llenar_cables(wb['Cables'], elementos_plano)
-    _llenar_veredas(wb['Vereda'], elementos_plano)
+    del_plano = _llenar_veredas(wb['Vereda'], elementos_plano)
+    _llenar_panos_medidos(wb['Vereda'], panos_medidos or {}, del_plano)
     _llenar_traslado_acarreo(wb['Traslado - Acarreo'], elementos_plano)
 
     buffer = io.BytesIO()
@@ -350,7 +377,39 @@ def _llenar_traslado_acarreo(ws, elementos_plano):
 
 
 def _llenar_veredas(ws, elementos_plano):
+    """Los paños del plano. Devuelve cuántas filas ocupó."""
     panos = [e for e in elementos_plano if e.get('tipo') == 'vereda']
+    escritas = 0
     for fila, pano in zip(range(VEREDA_PRIMERA, VEREDA_ULTIMA + 1), panos):
         ws[f'C{fila}'] = float(pano.get('largo') or 0)
         ws[f'D{fila}'] = float(pano.get('ancho') or 0)
+        escritas += 1
+    return escritas
+
+
+def _llenar_panos_medidos(ws, panos_medidos, filas_del_plano=0):
+    """Cada paño medido al liquidar, en su bloque. Si el plano ya ocupó las
+    primeras filas de la vereda de 10 cm, los medidos siguen debajo. Lo que
+    no entra en el bloque se deja fuera: pisaría el bloque de abajo."""
+    for clave, (col_largo, col_ancho, primera, ultima) in BLOQUES_DE_PANOS.items():
+        filas = [f for f in panos_medidos.get(clave) or []
+                 if isinstance(f, (list, tuple)) and len(f) >= 2]
+        if clave == 'vereda_10':
+            primera += filas_del_plano
+        for fila, (largo, ancho) in zip(range(primera, ultima + 1), filas):
+            ws[f'{col_largo}{fila}'] = float(largo or 0)
+            ws[f'{col_ancho}{fila}'] = float(ancho or 0)
+            faltante = FORMULAS_FALTANTES.get((clave, fila))
+            if faltante and ws[f'{faltante[0]}{fila}'].value in (None, ''):
+                ws[f'{faltante[0]}{fila}'] = faltante[1]
+
+
+def panos_de_liquidaciones(liquidaciones):
+    """Junta los paños medidos de varias liquidaciones (los postes de una
+    SST), por clave y en el orden en que se grabaron."""
+    juntos = {}
+    for liq in liquidaciones:
+        for clave, filas in ((liq.medidas or {}).get('panos') or {}).items():
+            if isinstance(filas, list):
+                juntos.setdefault(clave, []).extend(filas)
+    return juntos
