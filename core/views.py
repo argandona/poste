@@ -2279,11 +2279,18 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
         Excel de Tecsur."""
         from django.http import HttpResponse
 
-        from .excel_liquidacion import generar_excel_liquidacion
+        from .cuaderno_reforzamiento import _de_la_sst
+        from .excel_liquidacion import (generar_excel_liquidacion,
+                                        panos_de_liquidaciones)
 
         sst, datos = self._sst_liquidada(request)
         codigo = sst.codigo or sst.sst
         por_poste = partidas_cobradas_por_poste(sst)
+        # Los paños que se midieron al liquidar (reforzamiento) van a la hoja
+        # Vereda, cada uno en el bloque de su espesor.
+        panos = panos_de_liquidaciones(
+            LiquidacionSuministro.objects.filter(_de_la_sst(sst))
+            .distinct().order_by('id_liquidacion'))
         # La mano de obra va con lo que se COBRA, no con lo que se liquidó: el
         # paquete de cambio de poste ya incluye parte de ese trabajo y no se
         # cobra dos veces. Es la misma columna que muestra el consolidado.
@@ -2301,7 +2308,8 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
             ],
             # Los dos van en el orden en que se grabaron los postes, que es el
             # orden de las columnas del Excel.
-            postes=[numero for numero, _partidas in por_poste])
+            postes=[numero for numero, _partidas in por_poste],
+            panos_medidos=panos)
         resp = HttpResponse(
             contenido,
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
