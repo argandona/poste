@@ -23,7 +23,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models, transaction
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
-from rest_framework.exceptions import APIException
+from rest_framework.exceptions import APIException, PermissionDenied
 from rest_framework.parsers import MultiPartParser
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
@@ -51,6 +51,7 @@ from .models import (
     LiquidacionSuministro, LiquidacionPartida, ConsumoMaterialSuministro,
     CorreccionLiquidacion,
     PlanoSST, AsignacionAgregado,
+    EPP, StockEPP, IngresoEPP,
 )
 from .serializers import (
     EmpresaSerializer, RolSerializer,
@@ -73,6 +74,7 @@ from .serializers import (
     CorreccionLiquidacionSerializer,
     ConsumoMaterialSuministroSerializer,
     PlanoSSTSerializer,
+    EPPSerializer, IngresoEPPSerializer,
 )
 
 
@@ -262,7 +264,40 @@ class RolViewSet(viewsets.ReadOnlyModelViewSet):
 
 # ── Usuario ─────────────────────────────────────────────────────────────────
 class UsuarioViewSet(viewsets.ModelViewSet):
+    """Los usuarios. Verlos puede cualquiera con sesión (se eligen en varias
+    pantallas); crearlos, editarlos y restablecer claves, solo el SuperAdmin.
+    No se borran: se desactivan, porque sus pedidos y liquidaciones los
+    nombran."""
     permission_classes = [permissions.IsAuthenticated]
+    # Con operarios y ayudantes pasan de 20: una sola página.
+    pagination_class   = CatalogoPagination
+    http_method_names  = ['get', 'post', 'put', 'patch', 'head', 'options']
+
+    def _solo_superadmin(self, request):
+        actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
+        if not (actor and actor.puede_gestionar_usuarios()):
+            raise PermissionDenied('Solo el SuperAdmin gestiona usuarios.')
+
+    def create(self, request, *args, **kwargs):
+        self._solo_superadmin(request)
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        self._solo_superadmin(request)
+        return super().update(request, *args, **kwargs)
+
+    @action(detail=True, methods=['post'])
+    def resetear_clave(self, request, pk=None):
+        """POST /api/usuarios/{id}/resetear_clave/  {clave}"""
+        self._solo_superadmin(request)
+        from .security import hashear_clave
+        usuario = self.get_object()
+        clave = request.data.get('clave') or ''
+        if len(clave) < 6:
+            raise ErrorNegocio('La clave debe tener al menos 6 caracteres.')
+        usuario.clave = hashear_clave(clave)
+        usuario.save(update_fields=['clave'])
+        return Response({'detail': f'Clave de {usuario.nombre} restablecida.'})
 
     def get_serializer_class(self):
         if self.action in ('create', 'update', 'partial_update'):
@@ -270,7 +305,8 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         return UsuarioSerializer
 
     def get_queryset(self):
-        return qs_empresa(Usuario.objects.select_related('rol','empresa'), self.request)
+        return qs_empresa(Usuario.objects.select_related('rol','empresa')
+                          .order_by('nombre'), self.request)
 
     @action(detail=False, methods=['post'])
     def fcm_token(self, request):
@@ -3014,3 +3050,55 @@ class AsignacionAgregadoViewSet(viewsets.ViewSet):
                                            'fecha_anulacion'])
         asignacion = self._con_todo(AsignacionAgregado.objects).get(pk=asignacion.pk)
         return Response(self._datos(asignacion))
+
+
+# ── EPP ──────────────────────────────────────────────────────────────────────
+class EPPViewSet(viewsets.ModelViewSet):
+    """El catálogo de EPP. Lo ve cualquiera con sesión (para pedir); lo
+    edita el almacén. No se borra: se desactiva."""
+    serializer_class   = EPPSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class   = CatalogoPagination
+    http_method_names  = ['get', 'post', 'put', 'patch', 'head', 'options']
+
+    def get_queryset(self):
+        actor = Usuario.objects.filter(pk=self.request.user.id_usuario).first()
+        almacenes = Almacen.objects.filter(activo=True)
+        if actor and not actor.es_superadmin() and actor.empresa_id:
+            almacenes = almacenes.filter(empresa_id=actor.empresa_id)
+        qs = EPP.objects.annotate(stock=models.functions.Coalesce(
+            models.Sum('stocks__cantidad',
+                       filter=models.Q(stocks__almacen__in=almacenes)),
+            models.Value(Decimal('0')),
+            output_field=models.DecimalField(max_digits=12, decimal_places=2)))
+        if self.request.query_params.get('activos'):
+            qs = qs.filter(activo=True)
+        return qs.order_by('descripcion', 'id_epp')
+
+    def _solo_almacen(self):
+        actor = Usuario.objects.filter(pk=self.request.user.id_usuario).first()
+        if not (actor and actor.puede_gestionar_almacen()):
+            raise PermissionDenied('Solo el almacén edita el catálogo de EPP.')
+
+    def perform_create(self, serializer):
+        self._solo_almacen()
+        serializer.save()
+
+    def perform_update(self, serializer):
+        self._solo_almacen()
+        serializer.save()
+
+
+class IngresoEPPViewSet(viewsets.ModelViewSet):
+    """EPP que entra al almacén: suma al stock. Solo el almacén."""
+    serializer_class   = IngresoEPPSerializer
+    permission_classes = [permissions.IsAuthenticated, SoloAlmacen]
+    http_method_names  = ['get', 'post', 'head', 'options']
+
+    def get_queryset(self):
+        return (IngresoEPP.objects.select_related('almacen', 'usuario')
+                .prefetch_related('detalles__epp'))
+
+    def perform_create(self, serializer):
+        serializer.save(usuario=Usuario.objects.get(pk=self.request.user.id_usuario))
+

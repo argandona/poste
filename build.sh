@@ -26,3 +26,5 @@ python manage.py configurar_aereo_viento
 python manage.py configurar_partidas_de_sst
 # Reforzamiento de poste: las dos actividades de los encargados.
 python manage.py configurar_reforzamiento
+# Roles de la cuadrilla y el catálogo inicial de EPP.
+python manage.py configurar_epp
