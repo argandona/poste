@@ -20,6 +20,7 @@ from django.db.models import Q
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
+from reportlab.lib.utils import simpleSplit
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
@@ -74,6 +75,8 @@ class Hoja:
     fleje: str = ''
     hebilla: str = ''
     gel: str = ''
+    # La observación que se escribe al final de la liquidación.
+    observacion: str = ''
 
 
 def es_reforzamiento(sst):
@@ -175,6 +178,7 @@ def hoja_de(liq, sst):
         fleje=cantidad(materiales.get(FLEJE)),
         hebilla=cantidad(materiales.get(HEBILLA)),
         gel=cantidad(materiales.get(GEL)),
+        observacion=(liq.observacion or '').strip(),
     )
 
 
@@ -340,6 +344,21 @@ def _pagina(c, h):
     c.drawString(_IZQ, y, 'SE ELABORA EL PRESENTE CUADERNO DE OBRA EN SEÑAL '
                           'DE CONFORMIDAD DE LOS TRABAJOS')
     c.drawString(_IZQ, y - 0.45 * cm, 'EJECUTADOS')
+
+    # La observación de la liquidación, al final y antes de la firma. Lo que
+    # no entra en el espacio libre se corta con puntos suspensivos.
+    y -= 1.2 * cm
+    c.setFont('Helvetica-Bold', 9)
+    c.drawString(_IZQ, y, 'OBSERVACIONES:')
+    c.setFont('Helvetica', 9)
+    renglones = simpleSplit(h.observacion or VACIO, 'Helvetica', 9,
+                            _DER - _IZQ)
+    caben = max(1, int((y - 3.6 * cm) / (0.42 * cm)))
+    if len(renglones) > caben:
+        renglones = renglones[:caben]
+        renglones[-1] = renglones[-1].rstrip()[:-1] + '…'
+    for i, renglon in enumerate(renglones, start=1):
+        c.drawString(_IZQ, y - i * 0.42 * cm, renglon)
 
     # La firma: el nombre del encargado sobre la raya.
     y_firma = 2.4 * cm

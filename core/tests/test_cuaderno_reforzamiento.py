@@ -100,6 +100,19 @@ class CuadernoReforzamientoTests(BaseAPITestCase):
         self.assertEqual(h.grass, '3 x 1')
         self.assertEqual((h.cimentacion, h.rotura), ('', '1'))
 
+    def test_la_observacion_de_la_liquidacion_va_al_cuaderno(self):
+        liq = self.liquidar()
+        liq.observacion = '  Poste con fisura en la base.  '
+        liq.save()
+        [h] = reunir_reforzamiento(self.sst)
+        self.assertEqual(h.observacion, 'Poste con fisura en la base.')
+        self.assertTrue(generar_pdf_reforzamiento([h]).startswith(b'%PDF'))
+
+    def test_sin_observacion_queda_vacia(self):
+        self.liquidar()
+        [h] = reunir_reforzamiento(self.sst)
+        self.assertEqual(h.observacion, '')
+
     def test_lo_que_no_entra_se_junta_en_el_ultimo_renglon(self):
         self.assertEqual(en_renglones(['a', 'b', 'c', 'd'], 3),
                          ['a', 'b', 'c; d'])
