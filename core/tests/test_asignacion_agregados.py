@@ -1,5 +1,6 @@
 """
-Asignación de agregados: el cemento sale del almacén al camión sin pedido.
+Asignación de agregados y materiales: el cemento, o cualquier material con
+saldo, sale del almacén al camión sin pedido.
 
 Solo la usa el almacén (encargado de almacén y SuperAdmin), y sin
 aprobación: elige el camión y las bolsas pasan del almacén al camión en el
@@ -76,9 +77,17 @@ class AsignacionAgregadosTests(BaseAPITestCase):
         self.assertIn("solo hay 20", resp.json()["detail"])
         self.assertIsNone(self.stock_camion(self.cemento))
 
-    def test_solo_agregados(self):
-        self.assertEqual(
-            self.registrar(material=self.material_a.pk).status_code, 400)
+    def test_tambien_entrega_materiales(self):
+        # MAT-A no es agregado pero tiene 10 en el almacén.
+        resp = self.registrar(material=self.material_a.pk, cantidad='4')
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(self.stock_almacen(self.material_a), Decimal('6'))
+        self.assertEqual(self.stock_camion(self.material_a), Decimal('4'))
+
+    def test_material_sin_saldo_no(self):
+        # MAT-B no tiene fila de stock en el almacén.
+        resp = self.registrar(material=self.material_b.pk)
+        self.assertEqual(resp.status_code, 400)
 
     def test_cantidad_positiva(self):
         for cantidad in ("0", "-2", "abc"):
@@ -132,6 +141,12 @@ class AsignacionAgregadosTests(BaseAPITestCase):
         self.auth(self.encargado)
         d = self.client.get(f"{URL}opciones/").json()
         self.assertEqual([c["placa"] for c in d["camiones"]], ["ABC-123"])
-        [cemento] = d["agregados"]
+        # El cemento primero; después lo que tiene saldo (MAT-A), no MAT-B.
+        self.assertEqual([m["matricula"] for m in d["materiales"]],
+                         ["CEMENTO-425", "MAT-A"])
+        cemento = d["materiales"][0]
+        self.assertTrue(cemento["es_agregado"])
         self.assertEqual(Decimal(cemento["saldos"][str(self.almacen.pk)]),
                          Decimal("20"))
+        # El nombre de antes sigue, para las apps viejas.
+        self.assertEqual(d["agregados"], d["materiales"])

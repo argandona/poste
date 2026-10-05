@@ -2786,7 +2786,8 @@ class SoloAlmacen(permissions.BasePermission):
 
 
 class AsignacionAgregadoViewSet(viewsets.ViewSet):
-    """El cemento y los demás agregados salen del almacén al camión sin pedido.
+    """Asignación de agregados y materiales: el cemento, o cualquier material
+    con saldo, sale del almacén al camión sin pedido.
 
     Solo los registra el almacén, y sin aprobación: elige el camión y las
     bolsas se descuentan del almacén y se suman al camión en el acto. Si se
@@ -2860,29 +2861,38 @@ class AsignacionAgregadoViewSet(viewsets.ViewSet):
     def opciones(self, request):
         """GET /api/asignaciones-agregado/opciones/
 
-        Lo que hace falta para el formulario: los agregados con su saldo en
-        cada almacén y los camiones con responsable."""
+        Lo que hace falta para el formulario: lo que se puede entregar, con su
+        saldo en cada almacén, y los camiones con responsable. Se entregan los
+        agregados (aunque estén en cero, para que se vea que falta) y cualquier
+        material que tenga saldo en algún almacén."""
         actor = self._actor(request)
         if actor is None:
             raise ErrorNegocio('Usuario no encontrado.')
         almacenes = list(self._almacenes(actor))
-        agregados = list(Material.objects.filter(es_agregado=True)
-                         .order_by('descripcion'))
         saldos = {
             (s.almacen_id, s.material_id): s.cantidad
             for s in StockAlmacen.objects.filter(
-                almacen__in=almacenes, material__in=agregados)
+                almacen__in=almacenes, cantidad__gt=0)
         }
+        con_saldo = {material_id for _a, material_id in saldos}
+        # Los agregados primero, que son el uso diario; después lo demás.
+        materiales = sorted(
+            Material.objects.filter(Q(es_agregado=True) | Q(pk__in=con_saldo)),
+            key=lambda m: (not m.es_agregado, m.descripcion))
+        lista = [{
+            'id_material': m.pk,
+            'matricula': m.matricula,
+            'descripcion': m.descripcion,
+            'es_agregado': m.es_agregado,
+            'saldos': {str(a.pk): saldos.get((a.pk, m.pk), Decimal('0'))
+                       for a in almacenes},
+        } for m in materiales]
         datos = {
             'almacenes': [{'id_almacen': a.pk, 'nombre': a.nombre}
                           for a in almacenes],
-            'agregados': [{
-                'id_material': m.pk,
-                'matricula': m.matricula,
-                'descripcion': m.descripcion,
-                'saldos': {str(a.pk): saldos.get((a.pk, m.pk), Decimal('0'))
-                           for a in almacenes},
-            } for m in agregados],
+            'materiales': lista,
+            # El nombre de antes, para las apps que todavía lo leen así.
+            'agregados': lista,
         }
         vistos = set()
         camiones = []
@@ -2906,8 +2916,8 @@ class AsignacionAgregadoViewSet(viewsets.ViewSet):
         actor = self._actor(request)
 
         material = Material.objects.filter(pk=request.data.get('material')).first()
-        if material is None or not material.es_agregado:
-            raise ErrorNegocio('Elige un agregado del catálogo.')
+        if material is None:
+            raise ErrorNegocio('Elige el material.')
         try:
             cantidad = Decimal(str(request.data.get('cantidad')).replace(',', '.'))
         except ArithmeticError:
