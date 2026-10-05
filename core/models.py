@@ -1073,3 +1073,47 @@ class DetalleIngresoEPP(models.Model):
 
     class Meta:
         db_table = "detalle_ingreso_epp"
+
+
+class PedidoEPP(models.Model):
+    """Un usuario pide EPP para sí. Es nuevo (la primera vez) o un cambio (el
+    que tenía se malogró): el cambio trae una foto como evidencia, guardada en
+    la base porque Render borra los archivos en cada despliegue. Lo aprueban
+    el encargado de almacén o el SuperAdmin, y al aprobar se descuenta del
+    stock del almacén."""
+    TIPO_NUEVO = "nuevo"
+    TIPO_CAMBIO = "cambio"
+    TIPOS = [(TIPO_NUEVO, "Nuevo"), (TIPO_CAMBIO, "Cambio")]
+    ESTADOS = [("pendiente", "Pendiente"), ("aprobado", "Aprobado"),
+               ("rechazado", "Rechazado")]
+
+    id_pedido_epp = models.AutoField(primary_key=True)
+    usuario       = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name="pedidos_epp")
+    tipo          = models.CharField(max_length=10, choices=TIPOS)
+    estado        = models.CharField(max_length=10, choices=ESTADOS, default="pendiente")
+    # Por qué se cambia (roto, gastado...). Solo en los cambios.
+    motivo        = models.TextField(blank=True)
+    observacion   = models.TextField(blank=True)
+    foto          = models.BinaryField(null=True, blank=True)
+    foto_tipo     = models.CharField(max_length=30, blank=True)
+    fecha         = models.DateTimeField(auto_now_add=True)
+    almacen       = models.ForeignKey(Almacen, on_delete=models.PROTECT, null=True, blank=True, related_name="pedidos_epp")
+    usuario_aprueba = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, blank=True, related_name="pedidos_epp_aprobados")
+    fecha_aprobacion = models.DateTimeField(null=True, blank=True)
+    observacion_aprobacion = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "pedido_epp"
+        ordering = ["-fecha", "-id_pedido_epp"]
+
+
+class DetallePedidoEPP(models.Model):
+    id_detalle = models.AutoField(primary_key=True)
+    pedido     = models.ForeignKey(PedidoEPP, on_delete=models.CASCADE, related_name="detalles")
+    epp        = models.ForeignKey(EPP, on_delete=models.PROTECT, related_name="pedidos")
+    cantidad_solicitada = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0)])
+    cantidad_aprobada   = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(0)])
+
+    class Meta:
+        db_table = "detalle_pedido_epp"
+

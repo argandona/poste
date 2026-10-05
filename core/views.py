@@ -51,7 +51,7 @@ from .models import (
     LiquidacionSuministro, LiquidacionPartida, ConsumoMaterialSuministro,
     CorreccionLiquidacion,
     PlanoSST, AsignacionAgregado,
-    EPP, StockEPP, IngresoEPP,
+    EPP, StockEPP, IngresoEPP, PedidoEPP, DetallePedidoEPP,
 )
 from .serializers import (
     EmpresaSerializer, RolSerializer,
@@ -3101,4 +3101,266 @@ class IngresoEPPViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(usuario=Usuario.objects.get(pk=self.request.user.id_usuario))
+
+
+# ── Pedidos de EPP ───────────────────────────────────────────────────────────
+# La foto del cambio, ya comprimida en el celular. Más que esto es un error.
+FOTO_MAXIMA = 3 * 1024 * 1024
+
+
+class PedidoEPPViewSet(viewsets.ViewSet):
+    """Pedidos de EPP. Pide para sí el que sale a obra (operario, ayudante,
+    capataz, encargado); el cambio exige foto. Aprueba o rechaza solo el
+    almacén (encargado de almacén o SuperAdmin), y al aprobar se descuenta
+    del stock del almacén. Cada lado recibe su aviso."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @staticmethod
+    def _actor(request):
+        return Usuario.objects.filter(pk=request.user.id_usuario).first()
+
+    @staticmethod
+    def _con_todo(qs):
+        return (qs.select_related('usuario', 'almacen', 'usuario_aprueba')
+                .prefetch_related('detalles__epp')
+                .defer('foto'))
+
+    @staticmethod
+    def _datos(p):
+        return {
+            'id_pedido_epp': p.pk,
+            'usuario': p.usuario_id,
+            'usuario_nombre': p.usuario.nombre,
+            'usuario_dni': p.usuario.dni,
+            'tipo': p.tipo,
+            'estado': p.estado,
+            'motivo': p.motivo,
+            'observacion': p.observacion,
+            'tiene_foto': bool(p.foto_tipo),
+            'fecha': p.fecha,
+            'almacen': p.almacen_id,
+            'almacen_nombre': p.almacen.nombre if p.almacen_id else '',
+            'usuario_aprueba_nombre': (p.usuario_aprueba.nombre
+                                       if p.usuario_aprueba_id else ''),
+            'fecha_aprobacion': p.fecha_aprobacion,
+            'observacion_aprobacion': p.observacion_aprobacion,
+            'detalles': [{
+                'epp': d.epp_id,
+                'codigo': d.epp.codigo,
+                'descripcion': d.epp.descripcion,
+                'talla': d.epp.talla,
+                'unidad': d.epp.unidad,
+                'cantidad_solicitada': d.cantidad_solicitada,
+                'cantidad_aprobada': d.cantidad_aprobada,
+            } for d in p.detalles.all()],
+        }
+
+    def _visibles(self, actor):
+        qs = PedidoEPP.objects.all()
+        if actor.puede_gestionar_almacen():
+            if not actor.es_superadmin() and actor.empresa_id:
+                qs = qs.filter(usuario__empresa_id=actor.empresa_id)
+            return qs
+        return qs.filter(usuario=actor)
+
+    def list(self, request):
+        """GET /api/pedidos-epp/?estado=pendiente
+
+        El almacén ve los de su empresa; los demás, solo los suyos."""
+        actor = self._actor(request)
+        qs = self._con_todo(self._visibles(actor))
+        estado = request.query_params.get('estado')
+        if estado:
+            qs = qs.filter(estado=estado)
+        return Response([self._datos(p) for p in qs[:300]])
+
+    def create(self, request):
+        """POST /api/pedidos-epp/
+        {tipo, motivo?, observacion?, foto? (jpeg en base64),
+         detalles: [{epp, cantidad}]}"""
+        import base64
+        import binascii
+        actor = self._actor(request)
+        if not actor.puede_pedir_epp():
+            return Response({'detail': 'Tu rol no pide EPP.'}, status=403)
+        tipo = request.data.get('tipo')
+        if tipo not in (PedidoEPP.TIPO_NUEVO, PedidoEPP.TIPO_CAMBIO):
+            raise ErrorNegocio('El tipo debe ser nuevo o cambio.')
+
+        lineas = []
+        for d in request.data.get('detalles') or []:
+            epp = EPP.objects.filter(pk=d.get('epp'), activo=True).first()
+            if epp is None:
+                raise ErrorNegocio('Uno de los EPP no existe o está inactivo.')
+            try:
+                cantidad = Decimal(str(d.get('cantidad')).replace(',', '.'))
+            except ArithmeticError:
+                cantidad = None
+            if cantidad is None or not cantidad.is_finite() or cantidad <= 0:
+                raise ErrorNegocio(f'Cantidad inválida para {epp}.')
+            lineas.append((epp, cantidad.quantize(Decimal('0.01'))))
+        if not lineas:
+            raise ErrorNegocio('Elige al menos un EPP.')
+
+        foto = None
+        if request.data.get('foto'):
+            try:
+                foto = base64.b64decode(request.data['foto'], validate=True)
+            except (binascii.Error, ValueError):
+                raise ErrorNegocio('La foto no se pudo leer.')
+            if len(foto) > FOTO_MAXIMA:
+                raise ErrorNegocio('La foto es muy pesada.')
+        motivo = (request.data.get('motivo') or '').strip()
+        if tipo == PedidoEPP.TIPO_CAMBIO:
+            if not foto:
+                raise ErrorNegocio('Para un cambio hay que tomar la foto del EPP malogrado.')
+            if not motivo:
+                raise ErrorNegocio('Escribe por qué se cambia.')
+
+        with transaction.atomic():
+            pedido = PedidoEPP.objects.create(
+                usuario=actor, tipo=tipo, motivo=motivo,
+                observacion=(request.data.get('observacion') or '').strip(),
+                foto=foto, foto_tipo='image/jpeg' if foto else '')
+            for epp, cantidad in lineas:
+                DetallePedidoEPP.objects.create(
+                    pedido=pedido, epp=epp, cantidad_solicitada=cantidad)
+
+        from .fcm import send_notification
+        tokens = list(
+            Usuario.objects.filter(con_rol(*ROLES_QUE_APRUEBAN),
+                                   empresa_id=actor.empresa_id, activo=True)
+            .exclude(fcm_token__isnull=True).exclude(fcm_token='')
+            .values_list('fcm_token', flat=True))
+        send_notification(
+            tokens,
+            title=('Cambio de EPP por aprobar' if tipo == PedidoEPP.TIPO_CAMBIO
+                   else 'Pedido de EPP por aprobar'),
+            body=f'{actor.nombre} pidió ' + ', '.join(
+                f'{c.normalize():f} {e}' for e, c in lineas) + '.',
+            data={'tipo': 'pedido_epp_nuevo', 'pedido_id': str(pedido.pk)},
+        )
+        pedido = self._con_todo(PedidoEPP.objects).get(pk=pedido.pk)
+        return Response(self._datos(pedido), status=201)
+
+    @action(detail=True, methods=['get'])
+    def foto(self, request, pk=None):
+        """GET /api/pedidos-epp/{id}/foto/ — la evidencia del cambio."""
+        from django.http import HttpResponse
+        actor = self._actor(request)
+        pedido = self._visibles(actor).filter(pk=pk).first()
+        if pedido is None or not pedido.foto:
+            return Response({'detail': 'Sin foto.'}, status=404)
+        return HttpResponse(bytes(pedido.foto),
+                            content_type=pedido.foto_tipo or 'image/jpeg')
+
+    @action(detail=True, methods=['post'])
+    def aprobar(self, request, pk=None):
+        """POST /api/pedidos-epp/{id}/aprobar/
+        {accion: aprobar|rechazar, almacen?, observacion?,
+         detalles?: [{epp, cantidad_aprobada}]}
+
+        Sin detalles se aprueba lo pedido. Aprobar descuenta del almacén."""
+        actor = self._actor(request)
+        if not actor.puede_gestionar_almacen():
+            return Response({'detail': 'Solo el almacén aprueba EPP.'}, status=403)
+        accion = request.data.get('accion')
+        if accion not in ('aprobar', 'rechazar'):
+            raise ErrorNegocio('La acción debe ser aprobar o rechazar.')
+        observacion = (request.data.get('observacion') or '').strip()
+
+        with transaction.atomic():
+            pedido = (self._visibles(actor).select_for_update(of=('self',))
+                      .filter(pk=pk).first())
+            if pedido is None:
+                return Response({'detail': 'No existe.'}, status=404)
+            if pedido.estado != 'pendiente':
+                raise ErrorNegocio(f'El pedido ya está {pedido.estado}.')
+            if accion == 'aprobar':
+                almacenes = Almacen.objects.filter(activo=True)
+                if not actor.es_superadmin() and actor.empresa_id:
+                    almacenes = almacenes.filter(empresa_id=actor.empresa_id)
+                if request.data.get('almacen'):
+                    almacen = almacenes.filter(pk=request.data['almacen']).first()
+                else:
+                    almacen = almacenes.first() if almacenes.count() == 1 else None
+                if almacen is None:
+                    raise ErrorNegocio('Elige de qué almacén sale.')
+                aprobadas = {}
+                for d in request.data.get('detalles') or []:
+                    try:
+                        aprobadas[int(d.get('epp'))] = Decimal(
+                            str(d.get('cantidad_aprobada')).replace(',', '.'))
+                    except (ArithmeticError, TypeError, ValueError):
+                        raise ErrorNegocio('Cantidad aprobada inválida.')
+                for det in pedido.detalles.select_related('epp'):
+                    cantidad = aprobadas.get(det.epp_id, det.cantidad_solicitada)
+                    if not cantidad.is_finite() or cantidad < 0:
+                        raise ErrorNegocio(f'Cantidad aprobada inválida para {det.epp}.')
+                    cantidad = cantidad.quantize(Decimal('0.01'))
+                    if cantidad > 0:
+                        stock = (StockEPP.objects.select_for_update()
+                                 .filter(almacen=almacen, epp=det.epp).first())
+                        hay = stock.cantidad if stock else Decimal('0')
+                        if hay < cantidad:
+                            raise ErrorNegocio(
+                                f'En {almacen.nombre} solo hay {hay} de {det.epp}.')
+                        stock.cantidad -= cantidad
+                        stock.save(update_fields=['cantidad'])
+                    det.cantidad_aprobada = cantidad
+                    det.save(update_fields=['cantidad_aprobada'])
+                pedido.almacen = almacen
+            pedido.estado = 'aprobado' if accion == 'aprobar' else 'rechazado'
+            pedido.usuario_aprueba = actor
+            pedido.fecha_aprobacion = timezone.now()
+            pedido.observacion_aprobacion = observacion
+            pedido.save(update_fields=['estado', 'almacen', 'usuario_aprueba',
+                                       'fecha_aprobacion',
+                                       'observacion_aprobacion'])
+
+        if pedido.usuario.fcm_token:
+            from .fcm import send_notification
+            aprobado = pedido.estado == 'aprobado'
+            send_notification(
+                [pedido.usuario.fcm_token],
+                title='Pedido de EPP aprobado' if aprobado else 'Pedido de EPP rechazado',
+                body=('Recoge tu EPP en el almacén.' if aprobado
+                      else f'Tu pedido de EPP fue rechazado. {observacion}'.strip()),
+                data={'tipo': 'pedido_epp_aprobado' if aprobado
+                      else 'pedido_epp_rechazado',
+                      'pedido_id': str(pedido.pk)},
+            )
+        pedido = self._con_todo(PedidoEPP.objects).get(pk=pedido.pk)
+        return Response(self._datos(pedido))
+
+    @action(detail=False, methods=['get'])
+    def mis_epp(self, request):
+        """GET /api/pedidos-epp/mis_epp/?usuario=<id>
+
+        Lo que se le entregó a un usuario: cada EPP con su última entrega y
+        el total recibido. ?usuario solo lo usa el almacén."""
+        actor = self._actor(request)
+        usuario = actor
+        if request.query_params.get('usuario') and actor.puede_gestionar_almacen():
+            usuario = Usuario.objects.filter(
+                pk=request.query_params['usuario']).first() or actor
+        detalles = (DetallePedidoEPP.objects
+                    .filter(pedido__usuario=usuario, pedido__estado='aprobado',
+                            cantidad_aprobada__gt=0)
+                    .select_related('epp', 'pedido')
+                    .order_by('-pedido__fecha_aprobacion'))
+        por_epp = {}
+        for d in detalles:
+            fila = por_epp.setdefault(d.epp_id, {
+                'epp': d.epp_id, 'codigo': d.epp.codigo,
+                'descripcion': d.epp.descripcion, 'talla': d.epp.talla,
+                'unidad': d.epp.unidad, 'total': Decimal('0'),
+                'ultima_entrega': d.pedido.fecha_aprobacion,
+                'cambios': 0,
+            })
+            fila['total'] += d.cantidad_aprobada
+            if d.pedido.tipo == PedidoEPP.TIPO_CAMBIO:
+                fila['cambios'] += 1
+        return Response({'usuario': usuario.pk, 'usuario_nombre': usuario.nombre,
+                         'epp': list(por_epp.values())})
 

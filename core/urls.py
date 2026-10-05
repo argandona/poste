@@ -14,7 +14,7 @@ from .views import (
     PlanoSSTViewSet,
     ActividadViewSet, TipoTrabajoViewSet, ManoDeObraViewSet,
     RecuperoViewSet, AsignacionAgregadoViewSet,
-    EPPViewSet, IngresoEPPViewSet,
+    EPPViewSet, IngresoEPPViewSet, PedidoEPPViewSet,
 )
 
 router = DefaultRouter()
@@ -48,6 +48,7 @@ router.register(r'recuperos',            RecuperoViewSet,              basename=
 router.register(r'asignaciones-agregado', AsignacionAgregadoViewSet,  basename='asignacion-agregado')
 router.register(r'epp',                  EPPViewSet,                  basename='epp')
 router.register(r'ingresos-epp',         IngresoEPPViewSet,           basename='ingreso-epp')
+router.register(r'pedidos-epp',          PedidoEPPViewSet,            basename='pedido-epp')
 
 urlpatterns = [
     path('auth/login/',   LoginView.as_view(),   name='login'),
