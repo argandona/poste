@@ -3333,6 +3333,39 @@ class PedidoEPPViewSet(viewsets.ViewSet):
         pedido = self._con_todo(PedidoEPP.objects).get(pk=pedido.pk)
         return Response(self._datos(pedido))
 
+    def _historial(self, request):
+        actor = self._actor(request)
+        if not actor.puede_ver_historial_epp():
+            raise PermissionDenied('Solo el almacén, el SuperAdmin y el Coordinador ven el historial.')
+        from .historial_epp import armar_historial
+        return armar_historial(
+            None if actor.es_superadmin() else actor.empresa_id)
+
+    @action(detail=False, methods=['get'])
+    def historial(self, request):
+        """GET /api/pedidos-epp/historial/
+
+        Lo entregado a cada trabajador: una fila por trabajador y EPP, con la
+        fecha de cada entrega y los días que le duró."""
+        filas = self._historial(request)
+        return Response({
+            'columnas': max((len(f['entregas']) for f in filas), default=0),
+            'filas': filas,
+        })
+
+    @action(detail=False, methods=['get'])
+    def historial_excel(self, request):
+        """GET /api/pedidos-epp/historial_excel/ — la misma matriz en Excel."""
+        from django.http import HttpResponse
+        from .historial_epp import excel_historial
+        contenido = excel_historial(self._historial(request))
+        resp = HttpResponse(
+            contenido,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        resp['Content-Disposition'] = (
+            f'attachment; filename="historial_epp_{timezone.localdate():%Y%m%d}.xlsx"')
+        return resp
+
     @action(detail=False, methods=['get'])
     def mis_epp(self, request):
         """GET /api/pedidos-epp/mis_epp/?usuario=<id>
