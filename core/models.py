@@ -83,6 +83,8 @@ class Usuario(models.Model):
     def puede_gestionar_usuarios(self): return self._tiene(Rol.SUPERADMIN)
     # Pedir EPP para uno mismo: todo el que sale a obra.
     def puede_pedir_epp(self): return self._tiene(Rol.OPERARIO, Rol.AYUDANTE, Rol.CAPATAZ, Rol.ENCARGADO)
+    # El historial de EPP entregado a cada trabajador, con cuánto le duró.
+    def puede_ver_historial_epp(self): return self._tiene(Rol.SUPERADMIN, Rol.COORDINADOR, Rol.ENCARGADO_ALMACEN)
 
     def clean(self):
         if self.rol_secundario_id and self.rol_secundario_id == self.rol_id:
