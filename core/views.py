@@ -2963,6 +2963,17 @@ class AsignacionAgregadoViewSet(viewsets.ViewSet):
                 origen=AsignacionAgregado.ORIGEN_ALMACEN,
                 observacion=(request.data.get('observacion') or '').strip())
 
+        # Al responsable del camión le llega el aviso de lo que se le cargó.
+        if usuario.fcm_token:
+            from .fcm import send_notification
+            send_notification(
+                [usuario.fcm_token],
+                title='Te asignaron material',
+                body=(f'{cantidad.normalize():f} de {material.descripcion} '
+                      f'a tu camión {camion.placa}.'),
+                data={'tipo': 'material_asignado',
+                      'asignacion_id': str(asignacion.pk)},
+            )
         asignacion = self._con_todo(AsignacionAgregado.objects).get(pk=asignacion.pk)
         return Response(self._datos(asignacion), status=201)
 

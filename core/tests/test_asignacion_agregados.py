@@ -7,6 +7,7 @@ aprobación: elige el camión y las bolsas pasan del almacén al camión en el
 acto. Si se equivocó, anula y vuelven.
 """
 from decimal import Decimal
+from unittest import mock
 
 from ..models import (Almacen, AsignacionAgregado, Material, Rol,
                       StockAlmacen, StockCamion, Usuario)
@@ -59,6 +60,22 @@ class AsignacionAgregadosTests(BaseAPITestCase):
         a = AsignacionAgregado.objects.get()
         self.assertEqual((a.origen, a.usuario, a.registrado_por),
                          ("almacen", self.capataz, self.encargado))
+
+    def test_al_responsable_le_llega_el_aviso(self):
+        self.capataz.fcm_token = 'tok-capataz'
+        self.capataz.save()
+        with mock.patch('core.fcm.send_notification') as avisar:
+            resp = self.registrar(cantidad='2.5')
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(avisar.call_args.args[0], ['tok-capataz'])
+        self.assertEqual(avisar.call_args.kwargs['title'], 'Te asignaron material')
+        self.assertIn('2.5 de CEMENTO', avisar.call_args.kwargs['body'])
+        self.assertIn('ABC-123', avisar.call_args.kwargs['body'])
+
+    def test_sin_token_no_se_avisa(self):
+        with mock.patch('core.fcm.send_notification') as avisar:
+            self.registrar()
+        avisar.assert_not_called()
 
     def test_hay_que_elegir_camion(self):
         resp = self.registrar(camion=None)
