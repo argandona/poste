@@ -26,6 +26,8 @@ class Rol(models.Model):
     SUPERADMIN = 1; ADMIN_EMPRESA = 2; ENCARGADO = 3
     CAPATAZ = 4; LIQUIDADOR = 5; ENCARGADO_ALMACEN = 6
     COORDINADOR = 7
+    # El personal de las cuadrillas: solo piden y reciben su EPP.
+    OPERARIO = 8; AYUDANTE = 9
     id_rol      = models.AutoField(primary_key=True)
     descripcion = models.CharField(max_length=100)
     class Meta:
@@ -49,6 +51,8 @@ class Usuario(models.Model):
     ultimo_acceso  = models.DateTimeField(null=True, blank=True)
     telefono       = models.CharField(max_length=20, blank=True)
     fcm_token      = models.CharField(max_length=500, blank=True, null=True)
+    dni            = models.CharField(max_length=15, blank=True)
+    fecha_nacimiento = models.DateField(null=True, blank=True)
 
     @property
     def roles(self):
@@ -75,6 +79,10 @@ class Usuario(models.Model):
     # Las actas de corrección de liquidación: quién cambió qué y cuándo. Se
     # miran desde la web, no desde la app, y solo las ve el Coordinador.
     def puede_ver_correcciones(self): return self._tiene(Rol.COORDINADOR, Rol.SUPERADMIN)
+    # Crear y editar usuarios, y restablecer claves.
+    def puede_gestionar_usuarios(self): return self._tiene(Rol.SUPERADMIN)
+    # Pedir EPP para uno mismo: todo el que sale a obra.
+    def puede_pedir_epp(self): return self._tiene(Rol.OPERARIO, Rol.AYUDANTE, Rol.CAPATAZ, Rol.ENCARGADO)
 
     def clean(self):
         if self.rol_secundario_id and self.rol_secundario_id == self.rol_id:
@@ -1008,3 +1016,60 @@ class AsignacionAgregado(models.Model):
 
     def __str__(self):
         return f"{self.material} x {self.cantidad} -> {self.camion}"
+
+
+# ── EPP ──────────────────────────────────────────────────────────────────────
+class EPP(models.Model):
+    """Equipo de protección personal. Cada talla es un EPP aparte, con su
+    código y su stock: botas 42 y botas 43 no se reemplazan una por otra."""
+    id_epp      = models.AutoField(primary_key=True)
+    codigo      = models.CharField(max_length=50, unique=True)
+    descripcion = models.CharField(max_length=200)
+    unidad      = models.CharField(max_length=20, default="UND")
+    talla       = models.CharField(max_length=10, blank=True)
+    precio      = models.DecimalField(max_digits=12, decimal_places=2, default=0, validators=[MinValueValidator(0)])
+    activo      = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "epp"
+        ordering = ["descripcion", "id_epp"]
+
+    def __str__(self):
+        return f"{self.descripcion} {self.talla}".strip()
+
+
+class StockEPP(models.Model):
+    """Lo que hay de cada EPP en cada almacén. Sube con un ingreso y baja al
+    despachar un pedido."""
+    id_stock_epp = models.AutoField(primary_key=True)
+    almacen  = models.ForeignKey(Almacen, on_delete=models.PROTECT, related_name="stocks_epp")
+    epp      = models.ForeignKey(EPP, on_delete=models.PROTECT, related_name="stocks")
+    cantidad = models.DecimalField(max_digits=12, decimal_places=2, default=0, validators=[MinValueValidator(0)])
+
+    class Meta:
+        db_table = "stock_epp"
+        unique_together = ("almacen", "epp")
+
+
+class IngresoEPP(models.Model):
+    """EPP que entra al almacén."""
+    id_ingreso_epp = models.AutoField(primary_key=True)
+    almacen     = models.ForeignKey(Almacen, on_delete=models.PROTECT, related_name="ingresos_epp")
+    usuario     = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name="ingresos_epp")
+    fecha       = models.DateField()
+    observacion = models.TextField(blank=True)
+    creado      = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "ingreso_epp"
+        ordering = ["-fecha", "-id_ingreso_epp"]
+
+
+class DetalleIngresoEPP(models.Model):
+    id_detalle  = models.AutoField(primary_key=True)
+    ingreso     = models.ForeignKey(IngresoEPP, on_delete=models.CASCADE, related_name="detalles")
+    epp         = models.ForeignKey(EPP, on_delete=models.PROTECT, related_name="ingresos")
+    cantidad    = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0)])
+
+    class Meta:
+        db_table = "detalle_ingreso_epp"

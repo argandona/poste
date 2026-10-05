@@ -22,6 +22,7 @@ from .models import (
     LiquidacionSuministro, LiquidacionPartida, ConsumoMaterialSuministro,
     CorreccionLiquidacion,
     PlanoSST,
+    EPP, StockEPP, IngresoEPP, DetalleIngresoEPP,
 )
 
 
@@ -54,29 +55,60 @@ class UsuarioSerializer(serializers.ModelSerializer):
             'rol_secundario','rol_secundario_descripcion',
             'empresa','empresa_nombre',
             'activo','fecha_creacion','ultimo_acceso',
+            'dni','fecha_nacimiento',
         ]
         # clave nunca se expone en lectura
         extra_kwargs = {'clave': {'write_only': True}}
 
 class UsuarioCreateSerializer(serializers.ModelSerializer):
-    """Para crear/actualizar usuario con clave en texto plano (se hashea en el signal)."""
+    """Para crear o editar un usuario. La clave llega en texto plano y se
+    guarda con el hash de Django; al editar es opcional."""
+    clave = serializers.CharField(write_only=True, required=False,
+                                  min_length=6, trim_whitespace=False)
+
     class Meta:
         model  = Usuario
-        fields = ['nombre','email','telefono','rol','rol_secundario',
-                  'empresa','clave','activo']
+        fields = ['id_usuario','nombre','email','telefono','rol','rol_secundario',
+                  'empresa','clave','activo','dni','fecha_nacimiento']
+        read_only_fields = ['id_usuario']
+
+    def validate_email(self, valor):
+        return valor.strip().lower()
+
+    def validate_dni(self, valor):
+        valor = (valor or '').strip()
+        if valor:
+            otros = Usuario.objects.filter(dni=valor)
+            if self.instance is not None:
+                otros = otros.exclude(pk=self.instance.pk)
+            if otros.exists():
+                raise serializers.ValidationError(
+                    f'El DNI {valor} ya es de otro usuario.')
+        return valor
+
+    def validate(self, data):
+        if self.instance is None and not data.get('clave'):
+            raise serializers.ValidationError({'clave': 'La clave es obligatoria.'})
+        rol = data.get('rol') or getattr(self.instance, 'rol', None)
+        segundo = data.get('rol_secundario')
+        if segundo is not None and rol is not None and segundo.pk == rol.pk:
+            raise serializers.ValidationError(
+                {'rol_secundario': 'El segundo rol no puede ser el mismo.'})
+        return data
 
     def create(self, validated_data):
-        import hashlib
+        from .security import hashear_clave
         clave = validated_data.pop('clave')
         usuario = Usuario(**validated_data)
-        usuario.clave = hashlib.sha256(clave.encode()).hexdigest()
+        usuario.clave = hashear_clave(clave)
         usuario.save()
         return usuario
 
     def update(self, instance, validated_data):
-        import hashlib
-        if 'clave' in validated_data:
-            instance.clave = hashlib.sha256(validated_data.pop('clave').encode()).hexdigest()
+        from .security import hashear_clave
+        if validated_data.get('clave'):
+            instance.clave = hashear_clave(validated_data.pop('clave'))
+        validated_data.pop('clave', None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
@@ -1001,3 +1033,64 @@ class PlanoSSTSerializer(serializers.ModelSerializer):
         model  = PlanoSST
         fields = '__all__'
         read_only_fields = ('empresa', 'fecha_actualizacion')
+
+
+# ── EPP ──────────────────────────────────────────────────────────────────────
+class EPPSerializer(serializers.ModelSerializer):
+    # Lo que hay en los almacenes, sumado. Lo trae la vista ya anotado.
+    stock = serializers.DecimalField(max_digits=12, decimal_places=2,
+                                     read_only=True, default=0)
+
+    class Meta:
+        model  = EPP
+        fields = ['id_epp', 'codigo', 'descripcion', 'unidad', 'talla',
+                  'precio', 'activo', 'stock']
+
+    def validate_codigo(self, valor):
+        return valor.strip().upper()
+
+
+class DetalleIngresoEPPSerializer(serializers.ModelSerializer):
+    epp_codigo      = serializers.CharField(source='epp.codigo', read_only=True)
+    epp_descripcion = serializers.CharField(source='epp.descripcion', read_only=True)
+    epp_talla       = serializers.CharField(source='epp.talla', read_only=True)
+
+    class Meta:
+        model  = DetalleIngresoEPP
+        fields = ['epp', 'epp_codigo', 'epp_descripcion', 'epp_talla', 'cantidad']
+
+
+class IngresoEPPSerializer(serializers.ModelSerializer):
+    detalles       = DetalleIngresoEPPSerializer(many=True)
+    almacen_nombre = serializers.CharField(source='almacen.nombre', read_only=True)
+    usuario_nombre = serializers.CharField(source='usuario.nombre', read_only=True)
+
+    class Meta:
+        model  = IngresoEPP
+        fields = ['id_ingreso_epp', 'almacen', 'almacen_nombre', 'usuario',
+                  'usuario_nombre', 'fecha', 'observacion', 'detalles']
+        read_only_fields = ['usuario']
+
+    def validate_detalles(self, detalles):
+        if not detalles:
+            raise serializers.ValidationError('Agrega al menos un EPP.')
+        for d in detalles:
+            if d['cantidad'] <= 0:
+                raise serializers.ValidationError(
+                    'Las cantidades deben ser mayores que cero.')
+        return detalles
+
+    def create(self, validated_data):
+        from django.db import transaction
+        detalles = validated_data.pop('detalles')
+        with transaction.atomic():
+            ingreso = IngresoEPP.objects.create(**validated_data)
+            for d in detalles:
+                DetalleIngresoEPP.objects.create(ingreso=ingreso, **d)
+                stock, _ = StockEPP.objects.select_for_update().get_or_create(
+                    almacen=ingreso.almacen, epp=d['epp'],
+                    defaults={'cantidad': 0})
+                stock.cantidad += d['cantidad']
+                stock.save(update_fields=['cantidad'])
+        return ingreso
+
