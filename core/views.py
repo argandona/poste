@@ -3298,6 +3298,7 @@ class PedidoEPPViewSet(viewsets.ViewSet):
             'motivo': p.motivo,
             'observacion': p.observacion,
             'tiene_foto': bool(p.foto_tipo),
+            'origen': p.origen,
             'fecha': p.fecha,
             'almacen': p.almacen_id,
             'almacen_nombre': p.almacen.nombre if p.almacen_id else '',
@@ -3333,7 +3334,91 @@ class PedidoEPPViewSet(viewsets.ViewSet):
         estado = request.query_params.get('estado')
         if estado:
             qs = qs.filter(estado=estado)
+        origen = request.query_params.get('origen')
+        if origen:
+            qs = qs.filter(origen=origen)
         return Response([self._datos(p) for p in qs[:300]])
+
+    @action(detail=False, methods=['post'])
+    def asignar(self, request):
+        """POST /api/pedidos-epp/asignar/
+        {usuario, tipo: nuevo|cambio, almacen?, observacion?,
+         detalles: [{epp, cantidad}]}
+
+        El SuperAdmin entrega EPP a un trabajador sin que lo pida: queda como
+        una entrega aprobada (sale en Mis EPP y en el historial), se descuenta
+        del almacén en el acto y al trabajador le llega el aviso."""
+        actor = self._actor(request)
+        if not actor.puede_asignar_epp():
+            return Response({'detail': 'Solo el SuperAdmin asigna EPP.'}, status=403)
+        usuario = Usuario.objects.filter(pk=request.data.get('usuario'),
+                                         activo=True).first()
+        if usuario is None:
+            raise ErrorNegocio('Elige a quién se le entrega.')
+        if not usuario.puede_pedir_epp():
+            raise ErrorNegocio('Se entrega EPP a operarios, ayudantes, '
+                               'capataces y encargados.')
+        tipo = request.data.get('tipo') or PedidoEPP.TIPO_NUEVO
+        if tipo not in (PedidoEPP.TIPO_NUEVO, PedidoEPP.TIPO_CAMBIO):
+            raise ErrorNegocio('El tipo debe ser nuevo o cambio.')
+
+        lineas = []
+        for d in request.data.get('detalles') or []:
+            epp = EPP.objects.filter(pk=d.get('epp'), activo=True).first()
+            if epp is None:
+                raise ErrorNegocio('Uno de los EPP no existe o está inactivo.')
+            try:
+                cantidad = Decimal(str(d.get('cantidad')).replace(',', '.'))
+            except ArithmeticError:
+                cantidad = None
+            if cantidad is None or not cantidad.is_finite() or cantidad <= 0:
+                raise ErrorNegocio(f'Cantidad inválida para {epp}.')
+            lineas.append((epp, cantidad.quantize(Decimal('0.01'))))
+        if not lineas:
+            raise ErrorNegocio('Elige al menos un EPP.')
+
+        almacenes = Almacen.objects.filter(activo=True)
+        if not actor.es_superadmin() and actor.empresa_id:
+            almacenes = almacenes.filter(empresa_id=actor.empresa_id)
+        if request.data.get('almacen'):
+            almacen = almacenes.filter(pk=request.data['almacen']).first()
+        else:
+            almacen = almacenes.first() if almacenes.count() == 1 else None
+        if almacen is None:
+            raise ErrorNegocio('Elige de qué almacén sale.')
+
+        observacion = (request.data.get('observacion') or '').strip()
+        with transaction.atomic():
+            for epp, cantidad in lineas:
+                stock = (StockEPP.objects.select_for_update()
+                         .filter(almacen=almacen, epp=epp).first())
+                hay = stock.cantidad if stock else Decimal('0')
+                if hay < cantidad:
+                    raise ErrorNegocio(
+                        f'En {almacen.nombre} solo hay {hay} de {epp}.')
+                stock.cantidad -= cantidad
+                stock.save(update_fields=['cantidad'])
+            ahora = timezone.now()
+            pedido = PedidoEPP.objects.create(
+                usuario=usuario, tipo=tipo, estado='aprobado',
+                origen=PedidoEPP.ORIGEN_ASIGNACION, almacen=almacen,
+                usuario_aprueba=actor, fecha_aprobacion=ahora,
+                observacion_aprobacion=observacion)
+            for epp, cantidad in lineas:
+                DetallePedidoEPP.objects.create(
+                    pedido=pedido, epp=epp, cantidad_solicitada=cantidad,
+                    cantidad_aprobada=cantidad)
+
+        if usuario.fcm_token:
+            from .fcm import send_notification
+            send_notification(
+                [usuario.fcm_token],
+                title='Te asignaron EPP',
+                body=', '.join(f'{c.normalize():f} {e}' for e, c in lineas)
+                     + '. Recógelo en el almacén.',
+                data={'tipo': 'epp_asignado', 'pedido_id': str(pedido.pk)})
+        pedido = self._con_todo(PedidoEPP.objects).get(pk=pedido.pk)
+        return Response(self._datos(pedido), status=201)
 
     def create(self, request):
         """POST /api/pedidos-epp/
