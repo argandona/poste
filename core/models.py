@@ -85,6 +85,8 @@ class Usuario(models.Model):
     def puede_gestionar_unidades(self): return self._tiene(Rol.SUPERADMIN)
     # Ver los postes asignados que nadie liquidó todavía y deshacerlos.
     def puede_ver_pendientes_de_liquidar(self): return self._tiene(Rol.SUPERADMIN)
+    # Entregar EPP directamente a un trabajador, sin que lo pida.
+    def puede_asignar_epp(self): return self._tiene(Rol.SUPERADMIN)
     # Pedir EPP para uno mismo: todo el que sale a obra.
     def puede_pedir_epp(self): return self._tiene(Rol.OPERARIO, Rol.AYUDANTE, Rol.CAPATAZ, Rol.ENCARGADO)
     # El historial de EPP entregado a cada trabajador, con cuánto le duró.
@@ -1110,6 +1112,11 @@ class PedidoEPP(models.Model):
     usuario_aprueba = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, blank=True, related_name="pedidos_epp_aprobados")
     fecha_aprobacion = models.DateTimeField(null=True, blank=True)
     observacion_aprobacion = models.TextField(blank=True)
+    # Lo pidió el trabajador, o se lo asignó directamente el SuperAdmin.
+    ORIGEN_PEDIDO = "pedido"
+    ORIGEN_ASIGNACION = "asignacion"
+    origen = models.CharField(max_length=12, default=ORIGEN_PEDIDO, choices=[
+        (ORIGEN_PEDIDO, "Pedido"), (ORIGEN_ASIGNACION, "Asignación")])
 
     class Meta:
         db_table = "pedido_epp"
