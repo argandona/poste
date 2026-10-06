@@ -3038,20 +3038,32 @@ class AsignacionAgregadoViewSet(viewsets.ViewSet):
         return qs.select_related('material', 'camion', 'almacen', 'usuario',
                                  'registrado_por', 'anulada_por')
 
-    def list(self, request):
-        """GET /api/asignaciones-agregado/?dia=AAAA-MM-DD
+    # Un rango más largo que esto se pide por partes: la lista no se pagina.
+    DIAS_MAXIMOS = 370
 
-        Las del día (hoy, si no se dice otro), de los almacenes del actor."""
+    def list(self, request):
+        """GET /api/asignaciones-agregado/?desde=AAAA-MM-DD&hasta=AAAA-MM-DD
+
+        Las del rango, de los almacenes del actor (las dos fechas incluidas).
+        Sin fechas, las de hoy; con ?dia=, las de ese día (lo que usaba la
+        app antes)."""
         actor = self._actor(request)
         if actor is None:
             raise ErrorNegocio('Usuario no encontrado.')
+        p = request.query_params
+        hoy = str(timezone.localdate())
         try:
-            dia = datetime.date.fromisoformat(
-                request.query_params.get('dia') or str(timezone.localdate()))
+            desde = datetime.date.fromisoformat(p.get('desde') or p.get('dia') or hoy)
+            hasta = datetime.date.fromisoformat(p.get('hasta') or p.get('dia') or str(desde))
         except ValueError:
-            raise ErrorNegocio('La fecha debe ser AAAA-MM-DD.')
+            raise ErrorNegocio('Las fechas deben ser AAAA-MM-DD.')
+        if hasta < desde:
+            raise ErrorNegocio('La fecha final es anterior a la inicial.')
+        if (hasta - desde).days > self.DIAS_MAXIMOS:
+            raise ErrorNegocio('Elige un rango de un año como máximo.')
         qs = self._con_todo(AsignacionAgregado.objects.filter(
-            fecha__date=dia, almacen__in=self._almacenes(actor)))
+            fecha__date__gte=desde, fecha__date__lte=hasta,
+            almacen__in=self._almacenes(actor)))
         return Response([self._datos(a) for a in qs])
 
     @action(detail=False, methods=['get'])

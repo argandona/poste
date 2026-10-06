@@ -154,6 +154,29 @@ class AsignacionAgregadosTests(BaseAPITestCase):
         self.assertEqual(len(self.client.get(URL).json()), 2)
         self.assertEqual(len(self.client.get(URL, {"dia": "2020-01-01"}).json()), 0)
 
+    def test_por_rango_de_fechas(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        self.registrar()
+        viejo = self.registrar(cantidad='2').json()['id_asignacion']
+        AsignacionAgregado.objects.filter(pk=viejo).update(
+            fecha=timezone.now() - timedelta(days=10))
+        hoy = timezone.localdate()
+        hace = lambda n: str(hoy - timedelta(days=n))
+        self.auth(self.encargado)
+        self.assertEqual(len(self.client.get(URL).json()), 1)
+        r = self.client.get(URL, {'desde': hace(15), 'hasta': str(hoy)})
+        self.assertEqual(len(r.json()), 2)
+        r = self.client.get(URL, {'desde': hace(15), 'hasta': hace(5)})
+        self.assertEqual([a['id_asignacion'] for a in r.json()], [viejo])
+
+    def test_rango_invalido(self):
+        self.auth(self.encargado)
+        r = self.client.get(URL, {'desde': '2026-10-05', 'hasta': '2026-10-01'})
+        self.assertEqual(r.status_code, 400)
+        r = self.client.get(URL, {'desde': '2024-01-01', 'hasta': '2026-10-01'})
+        self.assertEqual(r.status_code, 400)
+
     def test_opciones(self):
         self.auth(self.encargado)
         d = self.client.get(f"{URL}opciones/").json()
