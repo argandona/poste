@@ -330,11 +330,113 @@ class UsuarioViewSet(viewsets.ModelViewSet):
 
 # ── Camion ──────────────────────────────────────────────────────────────────
 class CamionViewSet(viewsets.ModelViewSet):
+    """Gestión de unidades de transporte. Las ve cualquiera con sesión (se
+    eligen en pedidos y saldos); crearlas, modificarlas, eliminarlas y
+    asignarlas es solo del SuperAdmin. Antes cualquiera con sesión podía."""
     serializer_class   = CamionSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class   = CatalogoPagination
 
     def get_queryset(self):
-        return qs_empresa(Camion.objects.select_related('empresa'), self.request)
+        return qs_empresa(Camion.objects.select_related('empresa')
+                          .order_by('-activo', 'placa'), self.request)
+
+    def get_serializer_context(self):
+        contexto = super().get_serializer_context()
+        hoy = datetime.date.today()
+        contexto['responsables'] = {
+            r.camion_id: r for r in UsuarioCamion.objects
+            .filter(activo=True, fecha_inicio__lte=hoy)
+            .filter(models.Q(fecha_fin__isnull=True) | models.Q(fecha_fin__gte=hoy))
+            .select_related('usuario')}
+        return contexto
+
+    def _solo_superadmin(self):
+        actor = Usuario.objects.filter(pk=self.request.user.id_usuario).first()
+        if not (actor and actor.puede_gestionar_unidades()):
+            raise PermissionDenied('Solo el SuperAdmin gestiona las unidades de transporte.')
+        return actor
+
+    def perform_create(self, serializer):
+        actor = self._solo_superadmin()
+        datos = {}
+        if not serializer.validated_data.get('empresa'):
+            if not actor.empresa_id:
+                raise ErrorNegocio('Elige la empresa de la unidad.')
+            datos['empresa_id'] = actor.empresa_id
+        serializer.save(**datos)
+
+    def perform_update(self, serializer):
+        self._solo_superadmin()
+        serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        """DELETE /api/camiones/{id}/
+
+        Si la unidad nunca se usó, se borra. Si ya tiene historia (pedidos,
+        stock, liquidaciones...), se da de baja: queda inactiva y no se puede
+        asignar. Con responsable vigente no se toca: primero se libera o se
+        traspasa."""
+        from django.db.models.deletion import ProtectedError
+        self._solo_superadmin()
+        camion = self.get_object()
+        if self.get_serializer_context()['responsables'].get(camion.pk):
+            raise ErrorNegocio(
+                f'{camion.placa} tiene responsable: primero libéralo o '
+                'traspásalo en Responsables de Camión.')
+        try:
+            with transaction.atomic():
+                camion.delete()
+            return Response({'detail': f'Unidad {camion.placa} eliminada.',
+                             'eliminada': True})
+        except ProtectedError:
+            camion.activo = False
+            camion.save(update_fields=['activo'])
+            return Response({
+                'detail': f'{camion.placa} ya tiene movimientos: se dio de baja '
+                          'y queda en el historial.',
+                'eliminada': False})
+
+    @action(detail=True, methods=['post'])
+    def reactivar(self, request, pk=None):
+        """POST /api/camiones/{id}/reactivar/ — deshace la baja."""
+        self._solo_superadmin()
+        camion = self.get_object()
+        camion.activo = True
+        camion.save(update_fields=['activo'])
+        return Response(self.get_serializer(camion).data)
+
+    @action(detail=True, methods=['post'])
+    def asignar(self, request, pk=None):
+        """POST /api/camiones/{id}/asignar/  {usuario}
+
+        Asigna una unidad libre a un capataz o encargado. La asignación no
+        vence: se cierra al liberar o traspasar, como siempre."""
+        self._solo_superadmin()
+        camion = self.get_object()
+        if not camion.activo:
+            raise ErrorNegocio(f'{camion.placa} está dada de baja.')
+        usuario = Usuario.objects.filter(pk=request.data.get('usuario'),
+                                         activo=True).first()
+        if usuario is None:
+            raise ErrorNegocio('Elige a quién se asigna.')
+        if not (usuario.roles & {Rol.CAPATAZ, Rol.ENCARGADO}):
+            raise ErrorNegocio('Solo se asigna a capataces y encargados.')
+        asignacion = UsuarioCamion(camion=camion, usuario=usuario,
+                                   fecha_inicio=datetime.date.today())
+        try:
+            asignacion.full_clean()
+            asignacion.save()
+        except DjangoValidationError as e:
+            raise ErrorNegocio(' '.join(e.messages))
+        if usuario.fcm_token:
+            from .fcm import send_notification
+            send_notification(
+                [usuario.fcm_token],
+                title='Te asignaron una unidad',
+                body=f'La unidad {camion.placa} está a tu nombre.',
+                data={'tipo': 'unidad_asignada', 'camion_id': str(camion.pk)})
+        return Response(self.get_serializer(camion).data, status=201)
 
 
 # ── UsuarioCamion ────────────────────────────────────────────────────────────
@@ -860,18 +962,77 @@ class SSTViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def desasignar(self, request, pk=None):
         """POST /api/ssts/<id>/desasignar/  { suministros: [id_suministro,...] }
-        Quita la asignación de los suministros indicados (o de todos)."""
+
+        Deshace la asignación de los postes indicados (o de todos los de la
+        SST). Un poste que ya se liquidó no se deshace: su liquidación lo
+        nombra. Quien se queda sin postes en la SST deja de ser su encargado,
+        así la SST ya no le aparece."""
         actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
         if not actor or not actor.puede_asignar_sst():
             return Response(
                 {'detail': 'Solo un Coordinador puede desasignar.'}, status=403)
         sst = self.get_object()
         suministros_ids = request.data.get('suministros', [])
-        qs = SSTSuministro.objects.filter(sst=sst)
+        qs = SSTSuministro.objects.filter(sst=sst, asignado_a__isnull=False)
         if suministros_ids:
             qs = qs.filter(suministro_id__in=suministros_ids)
-        actualizados = qs.update(asignado_a=None)
+        liquidados = [r.suministro.numero_suministro for r in qs.select_related('suministro')
+                      if r.suministro.estado != 'asignado'
+                      or r.suministro.liquidaciones.exists()]
+        if liquidados:
+            raise ErrorNegocio(
+                'Ya se liquidó y no se puede deshacer: ' + ', '.join(liquidados) + '.')
+        with transaction.atomic():
+            quienes = set(qs.values_list('asignado_a_id', flat=True))
+            actualizados = qs.update(asignado_a=None)
+            for usuario_id in quienes:
+                if not SSTSuministro.objects.filter(
+                        sst=sst, asignado_a_id=usuario_id).exists():
+                    SSTEncargado.objects.filter(
+                        sst=sst, usuario_id=usuario_id).delete()
         return Response({'status': 'ok', 'suministros_desasignados': actualizados})
+
+    @action(detail=False, methods=['get'])
+    def pendientes_de_liquidar(self, request):
+        """GET /api/ssts/pendientes_de_liquidar/
+
+        Los postes asignados a capataces y encargados que todavía no se
+        liquidan, agrupados por persona y por SST. Solo el SuperAdmin; desde
+        aquí también los puede deshacer (desasignar)."""
+        actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
+        if not actor or not actor.puede_ver_pendientes_de_liquidar():
+            return Response({'detail': 'Solo el SuperAdmin.'}, status=403)
+        relaciones = (SSTSuministro.objects
+                      .filter(asignado_a__isnull=False,
+                              suministro__estado='asignado',
+                              suministro__liquidaciones__isnull=True)
+                      .select_related('sst', 'sst__actividad', 'suministro',
+                                      'asignado_a', 'asignado_a__rol')
+                      .order_by('asignado_a__nombre', 'sst__fecha_inicio',
+                                'sst__codigo', 'orden', 'id_sst_suministro'))
+        if not actor.es_superadmin() and actor.empresa_id:
+            relaciones = relaciones.filter(sst__empresa_id=actor.empresa_id)
+        personas = {}
+        for r in relaciones:
+            u = r.asignado_a
+            persona = personas.setdefault(u.pk, {
+                'usuario': u.pk, 'nombre': u.nombre,
+                'rol': u.rol.descripcion, 'ssts': {}})
+            sst = r.sst
+            fila = persona['ssts'].setdefault(sst.pk, {
+                'id_sst': sst.pk,
+                'sst': sst.codigo or sst.sst,
+                'actividad': sst.actividad.nombre if sst.actividad_id else '',
+                'distrito': sst.distrito or '',
+                'fecha': sst.fecha_inicio,
+                'postes': []})
+            fila['postes'].append({
+                'id_suministro': r.suministro_id,
+                'numero': r.suministro.numero_suministro})
+        return Response([
+            {**p, 'ssts': list(p['ssts'].values()),
+             'postes': sum(len(s['postes']) for s in p['ssts'].values())}
+            for p in personas.values()])
 
     @action(detail=False, methods=['post'])
     def set_actividad(self, request):

@@ -118,9 +118,24 @@ class UsuarioCreateSerializer(serializers.ModelSerializer):
 # ── Camion ──────────────────────────────────────
 class CamionSerializer(serializers.ModelSerializer):
     empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
+    # Quién lo tiene hoy. La vista lo trae ya resuelto en `_responsables`.
+    responsable    = serializers.SerializerMethodField()
+
     class Meta:
         model  = Camion
         fields = '__all__'
+        # La baja pasa por eliminar: un camión con historia no se borra.
+        read_only_fields = ('activo',)
+        # Si no viene, la unidad es de la empresa del que la crea.
+        extra_kwargs = {'empresa': {'required': False}}
+
+    def validate_placa(self, valor):
+        return valor.strip().upper()
+
+    def get_responsable(self, obj):
+        r = (self.context.get('responsables') or {}).get(obj.pk)
+        return ({'id_usuario_camion': r.pk, 'id_usuario': r.usuario_id,
+                 'nombre': r.usuario.nombre} if r else None)
 
 
 # ── UsuarioCamion ────────────────────────────────

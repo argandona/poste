@@ -81,6 +81,10 @@ class Usuario(models.Model):
     def puede_ver_correcciones(self): return self._tiene(Rol.COORDINADOR, Rol.SUPERADMIN)
     # Crear y editar usuarios, y restablecer claves.
     def puede_gestionar_usuarios(self): return self._tiene(Rol.SUPERADMIN)
+    # Crear, modificar, dar de baja y asignar las unidades de transporte.
+    def puede_gestionar_unidades(self): return self._tiene(Rol.SUPERADMIN)
+    # Ver los postes asignados que nadie liquidó todavía y deshacerlos.
+    def puede_ver_pendientes_de_liquidar(self): return self._tiene(Rol.SUPERADMIN)
     # Pedir EPP para uno mismo: todo el que sale a obra.
     def puede_pedir_epp(self): return self._tiene(Rol.OPERARIO, Rol.AYUDANTE, Rol.CAPATAZ, Rol.ENCARGADO)
     # El historial de EPP entregado a cada trabajador, con cuánto le duró.
@@ -105,6 +109,9 @@ class Camion(models.Model):
     placa       = models.CharField(max_length=20, unique=True)
     descripcion = models.CharField(max_length=200, blank=True)
     activo      = models.BooleanField(default=True)
+    # Vencimientos de los papeles de la unidad.
+    vence_soat  = models.DateField(null=True, blank=True)
+    vence_revision_tecnica = models.DateField(null=True, blank=True)
     class Meta:
         db_table = "camion"
     def __str__(self):
