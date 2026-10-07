@@ -87,6 +87,10 @@ class Usuario(models.Model):
     def puede_ver_pendientes_de_liquidar(self): return self._tiene(Rol.SUPERADMIN)
     # Entregar EPP directamente a un trabajador, sin que lo pida.
     def puede_asignar_epp(self): return self._tiene(Rol.SUPERADMIN)
+    # El IPC lo hacen el capataz y el encargado, antes de empezar en campo.
+    def puede_hacer_ipc(self): return self._tiene(Rol.CAPATAZ, Rol.ENCARGADO)
+    # Ver todos los IPC de la empresa (no solo los propios).
+    def puede_ver_todos_los_ipc(self): return self._tiene(Rol.SUPERADMIN, Rol.COORDINADOR)
     # Pedir EPP para uno mismo: todo el que sale a obra.
     def puede_pedir_epp(self): return self._tiene(Rol.OPERARIO, Rol.AYUDANTE, Rol.CAPATAZ, Rol.ENCARGADO)
     # El historial de EPP entregado a cada trabajador, con cuánto le duró.
@@ -1132,4 +1136,87 @@ class DetallePedidoEPP(models.Model):
 
     class Meta:
         db_table = "detalle_pedido_epp"
+
+
+# ── IPC: Instrucción Previa en Campo ─────────────────────────────────────────
+class ContactoEmergencia(models.Model):
+    """(8) En caso de emergencia: lo que el IPC trae precargado. Uno por
+    empresa; cada IPC se queda con una copia al crearse."""
+    id_contacto = models.AutoField(primary_key=True)
+    empresa     = models.OneToOneField(Empresa, on_delete=models.CASCADE, related_name="contacto_emergencia")
+    superior_nombre   = models.CharField(max_length=150, blank=True)
+    superior_telefono = models.CharField(max_length=30, blank=True)
+    medico_nombre     = models.CharField(max_length=150, blank=True)
+    medico_telefono   = models.CharField(max_length=30, blank=True)
+    centro_medico          = models.CharField(max_length=200, blank=True)
+    centro_medico_telefono = models.CharField(max_length=30, blank=True)
+
+    class Meta:
+        db_table = "contacto_emergencia"
+
+
+class IPC(models.Model):
+    """Instrucción Previa en Campo (formato F01-IA-SMAC-003). La hace un
+    capataz o encargado antes de empezar; a lo largo del día se le suman las
+    SST que va ejecutando. Solo vale el día en que se creó."""
+    ESTADOS = [("abierto", "Abierto"), ("cerrado", "Cerrado")]
+
+    id_ipc       = models.AutoField(primary_key=True)
+    empresa      = models.ForeignKey(Empresa, on_delete=models.PROTECT, related_name="ipcs")
+    responsable  = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name="ipcs_responsable")
+    coordinador  = models.ForeignKey(Usuario, on_delete=models.PROTECT, null=True, blank=True, related_name="ipcs_coordinados")
+    fecha        = models.DateField()
+    tarea        = models.TextField()
+    estado       = models.CharField(max_length=10, choices=ESTADOS, default="abierto")
+    formato_codigo  = models.CharField(max_length=30)
+    formato_version = models.CharField(max_length=10)
+    # Lo marcado en las secciones A y B, con las claves de core/ipc_formato.py.
+    datos        = models.JSONField(default=dict, blank=True)
+    observaciones = models.TextField(blank=True)
+    hora_cierre  = models.TimeField(null=True, blank=True)
+    creado       = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "ipc"
+        ordering = ["-fecha", "-id_ipc"]
+
+
+class IPCSST(models.Model):
+    """(16) Ubicación: cada SST que se ejecuta con este IPC."""
+    id_ipc_sst = models.AutoField(primary_key=True)
+    ipc        = models.ForeignKey(IPC, on_delete=models.CASCADE, related_name="ssts")
+    sst        = models.ForeignKey(SST, on_delete=models.PROTECT, related_name="ipcs")
+    direccion  = models.CharField(max_length=250, blank=True)
+    orden      = models.PositiveIntegerField(default=0)
+    agregada   = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "ipc_sst"
+        ordering = ["orden", "id_ipc_sst"]
+        unique_together = ("ipc", "sst")
+
+
+class IPCParticipante(models.Model):
+    """(15) Participantes. Cada uno confirma desde su app ("Conforme"); si no
+    puede, firma con el dedo en el equipo del responsable. El DNI y el cargo
+    se copian al momento: el IPC es un documento firmado."""
+    ESTADOS = [("pendiente", "Pendiente"), ("conforme", "Conforme")]
+    METODO_APP = "app"
+    METODO_EQUIPO = "equipo"
+    METODOS = [(METODO_APP, "Desde su app"), (METODO_EQUIPO, "En el equipo del responsable")]
+
+    id_participante = models.AutoField(primary_key=True)
+    ipc        = models.ForeignKey(IPC, on_delete=models.CASCADE, related_name="participantes")
+    usuario    = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name="ipcs_participante")
+    dni        = models.CharField(max_length=15, blank=True)
+    cargo      = models.CharField(max_length=100, blank=True)
+    estado     = models.CharField(max_length=10, choices=ESTADOS, default="pendiente")
+    metodo     = models.CharField(max_length=10, choices=METODOS, blank=True)
+    confirmado = models.DateTimeField(null=True, blank=True)
+    firma      = models.BinaryField(null=True, blank=True)
+
+    class Meta:
+        db_table = "ipc_participante"
+        ordering = ["id_participante"]
+        unique_together = ("ipc", "usuario")
 
