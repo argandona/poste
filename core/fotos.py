@@ -4,6 +4,7 @@ MEDIA_ROOT/fotos en local y en las pruebas. La base solo guarda el nombre que
 devuelve el almacenamiento."""
 import base64
 import binascii
+import logging
 import uuid
 from urllib.request import urlopen
 
@@ -12,6 +13,8 @@ from django.core.files.storage import Storage, storages
 from django.http import HttpResponse, HttpResponseRedirect
 
 from .errores import ErrorNegocio
+
+log = logging.getLogger(__name__)
 
 # Ya llegan comprimidas del celular. Más que esto es un error.
 FOTO_MAXIMA = 3 * 1024 * 1024
@@ -60,9 +63,15 @@ def leer_base64(valor):
 
 
 def guardar_foto(contenido, carpeta):
-    """Guarda los bytes de un jpeg y devuelve el nombre para la base."""
-    return storages['fotos'].save(
-        f'tecsur/{carpeta}/{uuid.uuid4().hex}.jpg', ContentFile(contenido))
+    """Guarda los bytes de un jpeg y devuelve el nombre para la base. Si
+    Cloudinary rechaza la subida (clave mala, cuota, red), lo dice en vez de
+    caer en un 500 mudo."""
+    try:
+        return storages['fotos'].save(
+            f'tecsur/{carpeta}/{uuid.uuid4().hex}.jpg', ContentFile(contenido))
+    except Exception as e:
+        log.exception('No se pudo guardar la foto')
+        raise ErrorNegocio(f'No se pudo guardar la foto: {e}')
 
 
 def url_foto(nombre):
