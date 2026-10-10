@@ -241,3 +241,11 @@ class CamionesTests(BaseAPITestCase):
                             ).json()['camiones'][0]
         self.assertEqual((c['rendimiento'], c['metodo']), (30.0, 'aproximado'))
         self.assertEqual(c['costo_km'], 0.6)
+
+    def test_si_falla_la_subida_de_la_foto_lo_dice(self):
+        with mock.patch('core.fotos.storages') as st:
+            st.__getitem__.return_value.save.side_effect = RuntimeError('Invalid api_key')
+            r = self.salir()
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('Invalid api_key', r.json()['detail'])
+        self.assertFalse(JornadaCamion.objects.exists())
