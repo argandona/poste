@@ -30,6 +30,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from .errores import ErrorNegocio
+from .fotos import guardar_foto, leer_base64, responder_foto, url_foto
 
 
 class CatalogoPagination(PageNumberPagination):
@@ -3279,8 +3280,6 @@ class IngresoEPPViewSet(viewsets.ModelViewSet):
 
 
 # ── Pedidos de EPP ───────────────────────────────────────────────────────────
-# La foto del cambio, ya comprimida en el celular. Más que esto es un error.
-FOTO_MAXIMA = 3 * 1024 * 1024
 
 
 class PedidoEPPViewSet(viewsets.ViewSet):
@@ -3312,6 +3311,7 @@ class PedidoEPPViewSet(viewsets.ViewSet):
             'motivo': p.motivo,
             'observacion': p.observacion,
             'tiene_foto': bool(p.foto_tipo),
+            'foto_url': url_foto(p.foto_archivo),
             'origen': p.origen,
             'fecha': p.fecha,
             'almacen': p.almacen_id,
@@ -3438,8 +3438,6 @@ class PedidoEPPViewSet(viewsets.ViewSet):
         """POST /api/pedidos-epp/
         {tipo, motivo?, observacion?, foto? (jpeg en base64),
          detalles: [{epp, cantidad}]}"""
-        import base64
-        import binascii
         actor = self._actor(request)
         if not actor.puede_pedir_epp():
             return Response({'detail': 'Tu rol no pide EPP.'}, status=403)
@@ -3462,14 +3460,7 @@ class PedidoEPPViewSet(viewsets.ViewSet):
         if not lineas:
             raise ErrorNegocio('Elige al menos un EPP.')
 
-        foto = None
-        if request.data.get('foto'):
-            try:
-                foto = base64.b64decode(request.data['foto'], validate=True)
-            except (binascii.Error, ValueError):
-                raise ErrorNegocio('La foto no se pudo leer.')
-            if len(foto) > FOTO_MAXIMA:
-                raise ErrorNegocio('La foto es muy pesada.')
+        foto = leer_base64(request.data.get('foto'))
         motivo = (request.data.get('motivo') or '').strip()
         if tipo == PedidoEPP.TIPO_CAMBIO:
             if not foto:
@@ -3477,11 +3468,14 @@ class PedidoEPPViewSet(viewsets.ViewSet):
             if not motivo:
                 raise ErrorNegocio('Escribe por qué se cambia.')
 
+        # Se sube antes de abrir la transacción: no se espera a Cloudinary
+        # con la base bloqueada.
+        archivo = guardar_foto(foto, 'epp') if foto else ''
         with transaction.atomic():
             pedido = PedidoEPP.objects.create(
                 usuario=actor, tipo=tipo, motivo=motivo,
                 observacion=(request.data.get('observacion') or '').strip(),
-                foto=foto, foto_tipo='image/jpeg' if foto else '')
+                foto_archivo=archivo, foto_tipo='image/jpeg' if foto else '')
             for epp, cantidad in lineas:
                 DetallePedidoEPP.objects.create(
                     pedido=pedido, epp=epp, cantidad_solicitada=cantidad)
@@ -3509,6 +3503,9 @@ class PedidoEPPViewSet(viewsets.ViewSet):
         from django.http import HttpResponse
         actor = self._actor(request)
         pedido = self._visibles(actor).filter(pk=pk).first()
+        if pedido is not None and pedido.foto_archivo:
+            return responder_foto(pedido.foto_archivo)
+        # Las de antes de mover_fotos siguen en la base.
         if pedido is None or not pedido.foto:
             return Response({'detail': 'Sin foto.'}, status=404)
         return HttpResponse(bytes(pedido.foto),

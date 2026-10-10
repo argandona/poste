@@ -102,10 +102,20 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-# WhiteNoise sirve los estáticos comprimidos en producción.
+# WhiteNoise sirve los estáticos comprimidos en producción. Las fotos de la
+# app van a Cloudinary si está CLOUDINARY_URL (Render borra el disco en cada
+# despliegue); en local y en las pruebas, a MEDIA_ROOT/fotos (core/fotos.py).
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+    "fotos": (
+        {"BACKEND": "core.fotos.CloudinaryStorage"}
+        if os.getenv("CLOUDINARY_URL")
+        else {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+            "OPTIONS": {"location": BASE_DIR / "media" / "fotos"},
+        }
+    ),
 }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
