@@ -86,6 +86,24 @@ class CamionesTests(BaseAPITestCase):
     def test_solo_el_chofer_registra(self):
         self.assertEqual(self.salir(usuario=self.capataz).status_code, 403)
 
+    def test_el_superadmin_tambien_registra_y_ve_solo_lo_suyo_en_mias(self):
+        admin = Usuario.objects.create(
+            nombre='Admin', email='admin@x.com', clave='x',
+            rol=Rol.objects.create(id_rol=Rol.SUPERADMIN, descripcion='SuperAdmin'))
+        self.auth(admin)
+        actual = self.client.get(f'{J}actual/').json()
+        self.assertIn(self.camion.pk, [c['id_camion'] for c in actual['camiones']])
+        jid = self.salir(usuario=admin).json()['id_jornada']
+        self.assertEqual(self.client.post(C, {'km': 1050, 'cantidad': '10', 'monto': '180',
+                                              'tanque_lleno': True, 'foto': FOTO},
+                                          format='json').status_code, 201)
+        self.assertEqual(self.client.post(f'{J}{jid}/cerrar/', {'km': 1100, 'foto': FOTO},
+                                          format='json').status_code, 200)
+        self.salir(2000, usuario=self.chofer)
+        self.auth(admin)
+        self.assertEqual(len(self.client.get(J).json()), 2)
+        self.assertEqual([j['id_jornada'] for j in self.client.get(f'{J}?mias=1').json()], [jid])
+
     def test_el_km_no_retrocede(self):
         jid = self.salir(1000).json()['id_jornada']
         self.assertIn('menor', self.cerrar(jid, 990).json()['detail'])
