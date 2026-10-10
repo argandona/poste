@@ -16,6 +16,7 @@ from .views import (
     RecuperoViewSet, AsignacionAgregadoViewSet,
     EPPViewSet, IngresoEPPViewSet, PedidoEPPViewSet, IPCViewSet,
 )
+from .camiones import CargaCombustibleViewSet, JornadaCamionViewSet
 
 router = DefaultRouter()
 router.register(r'empresas',              EmpresaViewSet,              basename='empresa')
@@ -50,6 +51,8 @@ router.register(r'epp',                  EPPViewSet,                  basename='
 router.register(r'ingresos-epp',         IngresoEPPViewSet,           basename='ingreso-epp')
 router.register(r'pedidos-epp',          PedidoEPPViewSet,            basename='pedido-epp')
 router.register(r'ipcs',                 IPCViewSet,                  basename='ipc')
+router.register(r'jornadas-camion',      JornadaCamionViewSet,        basename='jornada-camion')
+router.register(r'cargas-combustible',   CargaCombustibleViewSet,     basename='carga-combustible')
 
 urlpatterns = [
     path('auth/login/',   LoginView.as_view(),   name='login'),

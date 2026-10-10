@@ -28,6 +28,8 @@ class Rol(models.Model):
     COORDINADOR = 7
     # El personal de las cuadrillas: solo piden y reciben su EPP.
     OPERARIO = 8; AYUDANTE = 9
+    # Maneja el camión y registra su kilometraje y el combustible.
+    CHOFER = 10
     id_rol      = models.AutoField(primary_key=True)
     descripcion = models.CharField(max_length=100)
     class Meta:
@@ -95,6 +97,11 @@ class Usuario(models.Model):
     def puede_pedir_epp(self): return self._tiene(Rol.OPERARIO, Rol.AYUDANTE, Rol.CAPATAZ, Rol.ENCARGADO)
     # El historial de EPP entregado a cada trabajador, con cuánto le duró.
     def puede_ver_historial_epp(self): return self._tiene(Rol.SUPERADMIN, Rol.COORDINADOR, Rol.ENCARGADO_ALMACEN)
+    # Salida y cierre del camión, y las cargas de combustible: solo el chofer,
+    # que es el único que conduce.
+    def puede_manejar(self): return self._tiene(Rol.CHOFER)
+    # El informe mensual de kilometraje y combustible, y su alerta.
+    def puede_ver_informe_camiones(self): return self._tiene(Rol.SUPERADMIN, Rol.COORDINADOR)
 
     def clean(self):
         if self.rol_secundario_id and self.rol_secundario_id == self.rol_id:
@@ -110,6 +117,10 @@ class Usuario(models.Model):
 
 
 class Camion(models.Model):
+    COMBUSTIBLES = [("gasolina", "Gasolina"), ("diesel", "Diésel"),
+                    ("glp", "GLP"), ("gnv", "GNV")]
+    # Como se venden en el grifo.
+    UNIDADES = {"gasolina": "gal", "diesel": "gal", "glp": "L", "gnv": "m³"}
     id_camion   = models.AutoField(primary_key=True)
     empresa     = models.ForeignKey(Empresa, on_delete=models.PROTECT, related_name="camiones")
     placa       = models.CharField(max_length=20, unique=True)
@@ -118,6 +129,7 @@ class Camion(models.Model):
     # Vencimientos de los papeles de la unidad.
     vence_soat  = models.DateField(null=True, blank=True)
     vence_revision_tecnica = models.DateField(null=True, blank=True)
+    combustible = models.CharField(max_length=10, choices=COMBUSTIBLES, blank=True)
     class Meta:
         db_table = "camion"
     def __str__(self):
@@ -1222,3 +1234,68 @@ class IPCParticipante(models.Model):
         ordering = ["id_participante"]
         unique_together = ("ipc", "usuario")
 
+
+# ── Camiones: kilometraje y combustible ──────────────────────────────────────
+
+class JornadaCamion(models.Model):
+    """Una salida del camión. El chofer sale con el km y la foto del tablero,
+    dice a qué va (SST, trabajo interno o ambos) y al guardarlo cierra con km
+    y foto. El responsable del material (UsuarioCamion) se copia al salir."""
+    id_jornada   = models.AutoField(primary_key=True)
+    camion       = models.ForeignKey(Camion,  on_delete=models.PROTECT, related_name="jornadas")
+    chofer       = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name="jornadas_chofer")
+    responsable  = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name="jornadas_responsable", null=True, blank=True)
+    fecha        = models.DateField()
+    km_salida    = models.PositiveIntegerField()
+    foto_salida  = models.CharField(max_length=255)
+    hora_salida  = models.DateTimeField(auto_now_add=True)
+    trabajo_interno = models.TextField(blank=True)
+    km_cierre    = models.PositiveIntegerField(null=True, blank=True)
+    foto_cierre  = models.CharField(max_length=255, blank=True)
+    hora_cierre  = models.DateTimeField(null=True, blank=True)
+    observacion  = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "jornada_camion"
+        ordering = ["-hora_salida"]
+
+    @property
+    def abierta(self):
+        return self.km_cierre is None
+
+    def __str__(self):
+        return f"{self.camion} | {self.fecha} | {self.chofer}"
+
+
+class JornadaSST(models.Model):
+    id_jornada_sst = models.AutoField(primary_key=True)
+    jornada = models.ForeignKey(JornadaCamion, on_delete=models.CASCADE, related_name="ssts")
+    sst     = models.ForeignKey(SST, on_delete=models.PROTECT, related_name="jornadas")
+
+    class Meta:
+        db_table = "jornada_sst"
+        unique_together = ("jornada", "sst")
+
+
+class CargaCombustible(models.Model):
+    """Cada vez que echan combustible: km y foto del tablero, cantidad y
+    monto. El combustible se copia del camión (puede convertirse a GNV)."""
+    id_carga     = models.AutoField(primary_key=True)
+    camion       = models.ForeignKey(Camion,  on_delete=models.PROTECT, related_name="cargas")
+    chofer       = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name="cargas_combustible")
+    jornada      = models.ForeignKey(JornadaCamion, on_delete=models.PROTECT, related_name="cargas", null=True, blank=True)
+    fecha_hora   = models.DateTimeField(auto_now_add=True)
+    km           = models.PositiveIntegerField()
+    combustible  = models.CharField(max_length=10, choices=Camion.COMBUSTIBLES)
+    cantidad     = models.DecimalField(max_digits=10, decimal_places=3)
+    monto        = models.DecimalField(max_digits=10, decimal_places=2)
+    tanque_lleno = models.BooleanField(default=False)
+    grifo        = models.CharField(max_length=150, blank=True)
+    foto         = models.CharField(max_length=255)
+
+    class Meta:
+        db_table = "carga_combustible"
+        ordering = ["-fecha_hora"]
+
+    def __str__(self):
+        return f"{self.camion} | {self.fecha_hora:%Y-%m-%d} | {self.cantidad} {self.combustible}"
