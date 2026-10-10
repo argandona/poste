@@ -437,6 +437,12 @@ def informe_excel(informe):
 
 # ── API ──────────────────────────────────────────────────────────────────────
 
+def _camiones_de(actor):
+    """Los camiones que puede tomar: los de su empresa; el SuperAdmin, todos."""
+    qs = Camion.objects.all()
+    return qs if actor.es_superadmin() else qs.filter(empresa_id=actor.empresa_id)
+
+
 class JornadaCamionViewSet(viewsets.ViewSet):
     """Salidas del camión. El chofer sale, cambia a qué va y cierra; el
     SuperAdmin y el Coordinador miran todo y sacan el informe."""
@@ -461,9 +467,12 @@ class JornadaCamionViewSet(viewsets.ViewSet):
         return actor
 
     def list(self, request):
-        """GET /api/jornadas-camion/?anio=&mes=&camion="""
-        qs = self._visibles(_actor(request))
+        """GET /api/jornadas-camion/?anio=&mes=&camion=&mias=1"""
+        actor = _actor(request)
+        qs = self._visibles(actor)
         p = request.query_params
+        if p.get('mias'):
+            qs = qs.filter(chofer=actor)
         if p.get('anio') and p.get('mes'):
             qs = qs.filter(fecha__year=p['anio'], fecha__month=p['mes'])
         if p.get('camion'):
@@ -482,7 +491,7 @@ class JornadaCamionViewSet(viewsets.ViewSet):
                    .filter(km_cierre__isnull=True).select_related('chofer')}
         hoy = timezone.localdate()
         camiones = []
-        for c in Camion.objects.filter(activo=True, empresa_id=actor.empresa_id).order_by('placa'):
+        for c in _camiones_de(actor).filter(activo=True).order_by('placa'):
             r = responsable_de(c, hoy)
             camiones.append({
                 'id_camion': c.pk, 'placa': c.placa, 'descripcion': c.descripcion,
@@ -504,8 +513,7 @@ class JornadaCamionViewSet(viewsets.ViewSet):
         """GET /api/jornadas-camion/ssts/?camion= — las SST del responsable
         del camión, para elegir a qué sale."""
         actor = _actor(request)
-        camion = Camion.objects.filter(pk=request.query_params.get('camion'),
-                                       empresa_id=actor.empresa_id).first()
+        camion = _camiones_de(actor).filter(pk=request.query_params.get('camion')).first()
         if camion is None:
             raise ErrorNegocio('Elige el camión.')
         hoy = timezone.localdate()
@@ -518,9 +526,9 @@ class JornadaCamionViewSet(viewsets.ViewSet):
         })
 
     @staticmethod
-    def _motivo(actor, datos):
+    def _motivo(empresa_id, datos):
         ids = {int(x) for x in datos.get('ssts') or []}
-        ssts = list(SST.objects.filter(pk__in=ids, empresa_id=actor.empresa_id))
+        ssts = list(SST.objects.filter(pk__in=ids, empresa_id=empresa_id))
         if len(ssts) != len(ids):
             raise ErrorNegocio('Una de las SST no existe.')
         interno = (datos.get('trabajo_interno') or '').strip()
@@ -533,12 +541,11 @@ class JornadaCamionViewSet(viewsets.ViewSet):
         {camion, km, foto (jpeg base64), ssts: [id], trabajo_interno}"""
         actor = self._del_chofer(request)
         d = request.data
-        camion = Camion.objects.filter(pk=d.get('camion'), activo=True,
-                                       empresa_id=actor.empresa_id).first()
+        camion = _camiones_de(actor).filter(pk=d.get('camion'), activo=True).first()
         if camion is None:
             raise ErrorNegocio('Elige el camión.')
         km = _km(d.get('km'))
-        ssts, interno = self._motivo(actor, d)
+        ssts, interno = self._motivo(camion.empresa_id, d)
         foto = _foto_obligatoria(d.get('foto'))
 
         propia = JornadaCamion.objects.filter(chofer=actor, km_cierre__isnull=True).first()
@@ -578,7 +585,7 @@ class JornadaCamionViewSet(viewsets.ViewSet):
         """POST /api/jornadas-camion/{id}/motivo/ {ssts, trabajo_interno} —
         mientras está en ruta, cambiar a qué va."""
         actor, j = self._abierta_propia(request, pk)
-        ssts, interno = self._motivo(actor, request.data)
+        ssts, interno = self._motivo(j.camion.empresa_id, request.data)
         with transaction.atomic():
             j.trabajo_interno = interno
             j.save(update_fields=['trabajo_interno'])

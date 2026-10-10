@@ -97,9 +97,9 @@ class Usuario(models.Model):
     def puede_pedir_epp(self): return self._tiene(Rol.OPERARIO, Rol.AYUDANTE, Rol.CAPATAZ, Rol.ENCARGADO)
     # El historial de EPP entregado a cada trabajador, con cuánto le duró.
     def puede_ver_historial_epp(self): return self._tiene(Rol.SUPERADMIN, Rol.COORDINADOR, Rol.ENCARGADO_ALMACEN)
-    # Salida y cierre del camión, y las cargas de combustible: solo el chofer,
-    # que es el único que conduce.
-    def puede_manejar(self): return self._tiene(Rol.CHOFER)
+    # Salida y cierre del camión, y las cargas de combustible: el chofer, que
+    # es quien conduce, y el SuperAdmin.
+    def puede_manejar(self): return self._tiene(Rol.CHOFER, Rol.SUPERADMIN)
     # El informe mensual de kilometraje y combustible, y su alerta.
     def puede_ver_informe_camiones(self): return self._tiene(Rol.SUPERADMIN, Rol.COORDINADOR)
 
