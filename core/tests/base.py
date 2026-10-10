@@ -3,8 +3,12 @@ Base común para los tests de la API: arma un escenario mínimo pero realista
 (empresa, roles, camión con capataz asignado, almacén con stock) y expone
 helpers para autenticar peticiones con el JWT propio del proyecto.
 """
+import shutil
+import tempfile
 from datetime import date, timedelta
 
+from django.conf import settings
+from django.test import override_settings
 from rest_framework.test import APITestCase
 
 from ..authentication import CustomRefreshToken
@@ -19,6 +23,16 @@ class BaseAPITestCase(APITestCase):
 
     def setUp(self):
         super().setUp()
+
+        # Las fotos de cada test van a una carpeta temporal que se borra al
+        # terminar (core/fotos.py).
+        carpeta = tempfile.mkdtemp(prefix='fotos_test_')
+        self.addCleanup(shutil.rmtree, carpeta, True)
+        ajuste = override_settings(STORAGES={**settings.STORAGES, 'fotos': {
+            'BACKEND': 'django.core.files.storage.FileSystemStorage',
+            'OPTIONS': {'location': carpeta}}})
+        ajuste.enable()
+        self.addCleanup(ajuste.disable)
 
         # Los ids de Rol son constantes del dominio (Rol.CAPATAZ == 4, etc.),
         # así que se crean explícitamente y no con un autoincremental.

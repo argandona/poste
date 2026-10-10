@@ -28,3 +28,6 @@ python manage.py configurar_partidas_de_sst
 python manage.py configurar_reforzamiento
 # Roles de la cuadrilla y el catálogo inicial de EPP.
 python manage.py configurar_epp
+# Las fotos que quedaron en la base pasan a Cloudinary. Es idempotente y no
+# tumba el despliegue si Cloudinary falla: se reintenta en el siguiente.
+python manage.py mover_fotos || echo "mover_fotos falló; se reintenta en el próximo despliegue"

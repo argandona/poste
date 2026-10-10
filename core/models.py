@@ -1093,7 +1093,8 @@ class DetalleIngresoEPP(models.Model):
 class PedidoEPP(models.Model):
     """Un usuario pide EPP para sí. Es nuevo (la primera vez) o un cambio (el
     que tenía se malogró): el cambio trae una foto como evidencia, guardada en
-    la base porque Render borra los archivos en cada despliegue. Lo aprueban
+    Cloudinary (core/fotos.py); `foto` es la columna vieja, que
+    `mover_fotos` vacía. Lo aprueban
     el encargado de almacén o el SuperAdmin, y al aprobar se descuenta del
     stock del almacén."""
     TIPO_NUEVO = "nuevo"
@@ -1111,6 +1112,7 @@ class PedidoEPP(models.Model):
     observacion   = models.TextField(blank=True)
     foto          = models.BinaryField(null=True, blank=True)
     foto_tipo     = models.CharField(max_length=30, blank=True)
+    foto_archivo  = models.CharField(max_length=255, blank=True)
     fecha         = models.DateTimeField(auto_now_add=True)
     almacen       = models.ForeignKey(Almacen, on_delete=models.PROTECT, null=True, blank=True, related_name="pedidos_epp")
     usuario_aprueba = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, blank=True, related_name="pedidos_epp_aprobados")

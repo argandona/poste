@@ -84,6 +84,36 @@ class PedidosEPPTests(BaseAPITestCase):
         self.auth(self.capataz)
         self.assertEqual(self.client.get(f'{URL}{pid}/foto/').status_code, 404)
 
+    def test_la_foto_no_queda_en_la_base(self):
+        pid = self.pedir(tipo='cambio', foto=FOTO, motivo='Rota')[0].json()['id_pedido_epp']
+        pedido = PedidoEPP.objects.get(pk=pid)
+        self.assertIsNone(pedido.foto)
+        self.assertTrue(pedido.foto_archivo.startswith('tecsur/epp/'))
+
+    def test_en_cloudinary_la_foto_redirige(self):
+        pid = self.pedir(tipo='cambio', foto=FOTO, motivo='Rota')[0].json()['id_pedido_epp']
+        self.auth(self.operario)
+        with mock.patch('core.fotos.url_foto',
+                        return_value='https://res.cloudinary.com/x/foto.jpg'):
+            r = self.client.get(f'{URL}{pid}/foto/')
+        self.assertEqual((r.status_code, r['Location']),
+                         (302, 'https://res.cloudinary.com/x/foto.jpg'))
+
+    def test_mover_fotos_saca_las_viejas_de_la_base(self):
+        viejo = base64.b64decode(FOTO)
+        pid = self.pedir(tipo='nuevo')[0].json()['id_pedido_epp']
+        PedidoEPP.objects.filter(pk=pid).update(foto=viejo, foto_tipo='image/jpeg')
+        self.auth(self.operario)
+        self.assertEqual(self.client.get(f'{URL}{pid}/foto/').content, viejo)
+
+        call_command('mover_fotos', stdout=io.StringIO())  # sin Cloudinary: nada
+        self.assertIsNotNone(PedidoEPP.objects.get(pk=pid).foto)
+        call_command('mover_fotos', '--local', stdout=io.StringIO())
+        pedido = PedidoEPP.objects.get(pk=pid)
+        self.assertIsNone(pedido.foto)
+        self.assertTrue(pedido.foto_archivo)
+        self.assertEqual(self.client.get(f'{URL}{pid}/foto/').content, viejo)
+
     def test_quien_no_sale_a_obra_no_pide(self):
         resp, _ = self.pedir(self.encargado)
         self.assertEqual(resp.status_code, 403)
