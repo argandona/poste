@@ -3371,7 +3371,7 @@ class PedidoEPPViewSet(viewsets.ViewSet):
             raise ErrorNegocio('Elige a quién se le entrega.')
         if not usuario.puede_pedir_epp():
             raise ErrorNegocio('Se entrega EPP a operarios, ayudantes, '
-                               'capataces y encargados.')
+                               'capataces, encargados y choferes.')
         tipo = request.data.get('tipo') or PedidoEPP.TIPO_NUEVO
         if tipo not in (PedidoEPP.TIPO_NUEVO, PedidoEPP.TIPO_CAMBIO):
             raise ErrorNegocio('El tipo debe ser nuevo o cambio.')
@@ -3744,7 +3744,7 @@ class IPCViewSet(viewsets.ViewSet):
     def _candidato(actor, usuario_id):
         u = (Usuario.objects.select_related('rol')
              .filter(pk=usuario_id, activo=True).first())
-        if u is None or not u.puede_pedir_epp():
+        if u is None or not u.participa_en_ipc():
             raise ErrorNegocio('Los participantes son operarios, ayudantes, '
                                'capataces y encargados.')
         if (not actor.es_superadmin() and actor.empresa_id

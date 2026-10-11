@@ -74,6 +74,15 @@ class AsignacionEPPTests(BaseAPITestCase):
         r, _ = self.asignar(usuario=self.encargado.pk)  # encargado de almacén
         self.assertEqual(r.status_code, 400)
 
+    def test_al_chofer_tambien_se_le_entrega(self):
+        chofer = Usuario.objects.create(
+            nombre='Carlos Chofer', email='chofer@x.com', clave='x', empresa=self.empresa,
+            rol=Rol.objects.create(id_rol=Rol.CHOFER, descripcion='Chofer'))
+        r, _ = self.asignar(usuario=chofer.pk)
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertTrue(chofer.puede_pedir_epp())
+        self.assertFalse(chofer.participa_en_ipc())
+
     def test_se_listan_aparte(self):
         self.asignar()
         self.auth(self.pedro)
