@@ -7,7 +7,10 @@ services:
     # De pago: Starter (0.5 CPU, 512 MB). Verificado en el panel el 2026-10-11.
     plan: starter
     buildCommand: "./build.sh"
-    startCommand: "gunicorn config.wsgi:application"
+    # 2 procesos x 4 hilos: atiende hasta 8 pedidos a la vez (antes 1). Los
+    # hilos esperan a Cloudinary o a la base sin bloquear a los demás. Cabe en
+    # los 512 MB de Starter (~150 MB por proceso). timeout 60 por los Excel.
+    startCommand: "gunicorn config.wsgi:application --workers 2 --threads 4 --timeout 60"
     envVars:
       - key: SECRET_KEY
         generateValue: true
