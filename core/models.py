@@ -94,7 +94,10 @@ class Usuario(models.Model):
     # Ver todos los IPC de la empresa (no solo los propios).
     def puede_ver_todos_los_ipc(self): return self._tiene(Rol.SUPERADMIN, Rol.COORDINADOR)
     # Pedir EPP para uno mismo: todo el que sale a obra.
-    def puede_pedir_epp(self): return self._tiene(Rol.OPERARIO, Rol.AYUDANTE, Rol.CAPATAZ, Rol.ENCARGADO)
+    def puede_pedir_epp(self): return self._tiene(Rol.OPERARIO, Rol.AYUDANTE, Rol.CAPATAZ,
+                                                  Rol.ENCARGADO, Rol.CHOFER)
+    # Firman el IPC como cuadrilla. El chofer no (pidió EPP, no el IPC).
+    def participa_en_ipc(self): return self._tiene(Rol.OPERARIO, Rol.AYUDANTE, Rol.CAPATAZ, Rol.ENCARGADO)
     # El historial de EPP entregado a cada trabajador, con cuánto le duró.
     def puede_ver_historial_epp(self): return self._tiene(Rol.SUPERADMIN, Rol.COORDINADOR, Rol.ENCARGADO_ALMACEN)
     # Salida y cierre del camión, y las cargas de combustible: el chofer, que
