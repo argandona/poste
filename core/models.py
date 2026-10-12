@@ -1253,6 +1253,8 @@ class JornadaCamion(models.Model):
     foto_salida  = models.CharField(max_length=255)
     hora_salida  = models.DateTimeField(auto_now_add=True)
     trabajo_interno = models.TextField(blank=True)
+    # Distrito del trabajo escrito a mano. El de las SST sale de cada SST.
+    distrito_interno = models.CharField(max_length=100, blank=True)
     km_cierre    = models.PositiveIntegerField(null=True, blank=True)
     foto_cierre  = models.CharField(max_length=255, blank=True)
     hora_cierre  = models.DateTimeField(null=True, blank=True)

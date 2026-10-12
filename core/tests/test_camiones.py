@@ -80,8 +80,17 @@ class CamionesTests(BaseAPITestCase):
     def test_sin_foto_o_sin_motivo_no_sale(self):
         self.assertIn('foto', self.salir(foto='').json()['detail'])
         self.assertIn('trabajo interno', self.salir(ssts=[]).json()['detail'])
-        self.assertEqual(self.salir(ssts=[], trabajo_interno='Llevar postes al almacén')
-                         .status_code, 201)
+        self.assertIn('distrito', self.salir(ssts=[], trabajo_interno='Llevar postes')
+                      .json()['detail'])
+        r = self.salir(ssts=[], trabajo_interno='Llevar postes al almacén',
+                       distrito_interno='Ate')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.json()['distritos'], ['Ate'])
+
+    def test_el_distrito_de_la_sst_sale_solo(self):
+        r = self.salir(trabajo_interno='Recoger cable', distrito_interno=' Ate ').json()
+        self.assertEqual(r['ssts'][0]['distrito'], 'Surco')
+        self.assertEqual(r['distritos'], ['Surco', 'Ate'])
 
     def test_solo_el_chofer_registra(self):
         self.assertEqual(self.salir(usuario=self.capataz).status_code, 403)
@@ -131,10 +140,12 @@ class CamionesTests(BaseAPITestCase):
     def test_cambia_a_que_va_en_ruta(self):
         jid = self.salir().json()['id_jornada']
         r = self.client.post(f'{J}{jid}/motivo/',
-                             {'ssts': [], 'trabajo_interno': 'Traslado de material'},
+                             {'ssts': [], 'trabajo_interno': 'Traslado de material',
+                              'distrito_interno': 'Lurín'},
                              format='json')
-        self.assertEqual((r.json()['ssts'], r.json()['trabajo_interno']),
-                         ([], 'Traslado de material'))
+        self.assertEqual((r.json()['ssts'], r.json()['trabajo_interno'],
+                          r.json()['distritos']),
+                         ([], 'Traslado de material', ['Lurín']))
 
     def test_la_foto_la_ven_el_chofer_y_el_coordinador(self):
         jid = self.salir().json()['id_jornada']
@@ -195,7 +206,8 @@ class CamionesTests(BaseAPITestCase):
         self.cerrar(jid, 1200)
         # Otra salida, de trabajo interno, que arranca más adelante: hay km
         # que nadie registró entre el cierre y la salida.
-        jid = self.salir(1230, ssts=[], trabajo_interno='Almacén').json()['id_jornada']
+        jid = self.salir(1230, ssts=[], trabajo_interno='Almacén',
+                         distrito_interno='Ate').json()['id_jornada']
         self.cerrar(jid, 1260)
 
         hoy = timezone.localdate()
@@ -217,6 +229,10 @@ class CamionesTests(BaseAPITestCase):
         libro = openpyxl.load_workbook(io.BytesIO(r.content))
         self.assertEqual(libro.sheetnames, ['Resumen', 'Salidas', 'Combustible'])
         self.assertEqual(libro['Resumen']['A4'].value, 'ABC-123')
+        salidas = libro['Salidas']
+        col = [c.value for c in salidas[3]].index('Distrito') + 1
+        self.assertEqual(sorted(salidas.cell(row=f, column=col).value for f in (4, 5)),
+                         ['Ate', 'Surco'])
 
     def test_salida_sin_cierre_de_un_dia_anterior(self):
         jid = self.salir(1000).json()['id_jornada']

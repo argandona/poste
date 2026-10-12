@@ -122,12 +122,21 @@ def datos_jornada(j):
         'km_recorridos': km_de_jornada(j, cargas),
         'abierta': j.abierta,
         'trabajo_interno': j.trabajo_interno,
+        'distrito_interno': j.distrito_interno,
+        'distritos': distritos_de(j),
         'observacion': j.observacion,
-        'ssts': [{'id_sst': x.sst_id, 'sst': _sst_texto(x.sst),
+        'ssts': [{'id_sst': x.sst_id, 'sst': _sst_texto(x.sst), 'distrito': x.sst.distrito,
                   'actividad': x.sst.actividad.nombre if x.sst.actividad_id else ''}
                  for x in j.ssts.all()],
         'cargas': [datos_carga(c) for c in cargas],
     }
+
+
+def distritos_de(j):
+    """Los distritos a los que fue: el de cada SST y el del trabajo interno,
+    sin repetir y en ese orden."""
+    vistos = [x.sst.distrito for x in j.ssts.all()] + [j.distrito_interno]
+    return list(dict.fromkeys(d.strip() for d in vistos if d and d.strip()))
 
 
 def datos_carga(c):
@@ -410,15 +419,15 @@ def informe_excel(informe):
     hoja(wb.create_sheet('Salidas'),
          ['Placa', 'Fecha', 'Chofer', 'Responsable', 'Salida', 'Km salida',
           'Cierre', 'Km cierre', 'Km recorridos', 'Km sin registrar', 'SST',
-          'Trabajo interno', 'Observación'],
+          'Trabajo interno', 'Distrito', 'Observación'],
          [[c['placa'], j['fecha'], j['chofer_nombre'], j['responsable_nombre'],
            hora(j['hora_salida']), j['km_salida'], hora(j['hora_cierre']),
            j['km_cierre'] if j['km_cierre'] is not None else 'SIN CIERRE',
            j['km_recorridos'], j['km_sin_registrar'],
            ', '.join(s['sst'] for s in j['ssts']), j['trabajo_interno'],
-           j['observacion']]
+           ', '.join(j['distritos']), j['observacion']]
           for c in informe['camiones'] for j in c['jornadas']],
-         [11, 11, 22, 22, 8, 10, 8, 11, 12, 14, 24, 30, 30])
+         [11, 11, 22, 22, 8, 10, 8, 11, 12, 14, 24, 30, 20, 30])
     hoja(wb.create_sheet('Combustible'),
          ['Placa', 'Fecha', 'Hora', 'Chofer', 'Km', 'Combustible', 'Cantidad',
           'Unidad', 'S/', 'S/ por unidad', 'Tanque lleno', 'Grifo'],
@@ -534,18 +543,22 @@ class JornadaCamionViewSet(viewsets.ViewSet):
         interno = (datos.get('trabajo_interno') or '').strip()
         if not ssts and not interno:
             raise ErrorNegocio('Elige las SST o describe el trabajo interno.')
-        return ssts, interno
+        distrito = (datos.get('distrito_interno') or '').strip() if interno else ''
+        if interno and not distrito:
+            raise ErrorNegocio('Escribe el distrito del trabajo interno.')
+        return ssts, interno, distrito
 
     def create(self, request):
         """POST /api/jornadas-camion/ — la salida.
-        {camion, km, foto (jpeg base64), ssts: [id], trabajo_interno}"""
+        {camion, km, foto (jpeg base64), ssts: [id], trabajo_interno,
+         distrito_interno (obligatorio con trabajo_interno)}"""
         actor = self._del_chofer(request)
         d = request.data
         camion = _camiones_de(actor).filter(pk=d.get('camion'), activo=True).first()
         if camion is None:
             raise ErrorNegocio('Elige el camión.')
         km = _km(d.get('km'))
-        ssts, interno = self._motivo(camion.empresa_id, d)
+        ssts, interno, distrito = self._motivo(camion.empresa_id, d)
         foto = _foto_obligatoria(d.get('foto'))
 
         propia = JornadaCamion.objects.filter(chofer=actor, km_cierre__isnull=True).first()
@@ -566,7 +579,8 @@ class JornadaCamionViewSet(viewsets.ViewSet):
         with transaction.atomic():
             j = JornadaCamion.objects.create(
                 camion=camion, chofer=actor, responsable=responsable_de(camion, hoy),
-                fecha=hoy, km_salida=km, foto_salida=archivo, trabajo_interno=interno)
+                fecha=hoy, km_salida=km, foto_salida=archivo, trabajo_interno=interno,
+                distrito_interno=distrito)
             JornadaSST.objects.bulk_create([JornadaSST(jornada=j, sst=s) for s in ssts])
         return Response(datos_jornada(_jornadas_con_todo(JornadaCamion.objects).get(pk=j.pk)),
                         status=201)
@@ -582,13 +596,14 @@ class JornadaCamionViewSet(viewsets.ViewSet):
 
     @action(detail=True, methods=['post'])
     def motivo(self, request, pk=None):
-        """POST /api/jornadas-camion/{id}/motivo/ {ssts, trabajo_interno} —
+        """POST /api/jornadas-camion/{id}/motivo/ {ssts, trabajo_interno, distrito_interno} —
         mientras está en ruta, cambiar a qué va."""
         actor, j = self._abierta_propia(request, pk)
-        ssts, interno = self._motivo(j.camion.empresa_id, request.data)
+        ssts, interno, distrito = self._motivo(j.camion.empresa_id, request.data)
         with transaction.atomic():
             j.trabajo_interno = interno
-            j.save(update_fields=['trabajo_interno'])
+            j.distrito_interno = distrito
+            j.save(update_fields=['trabajo_interno', 'distrito_interno'])
             j.ssts.all().delete()
             JornadaSST.objects.bulk_create([JornadaSST(jornada=j, sst=s) for s in ssts])
         return Response(datos_jornada(_jornadas_con_todo(JornadaCamion.objects).get(pk=j.pk)))
