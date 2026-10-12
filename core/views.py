@@ -1261,7 +1261,9 @@ class MaterialViewSet(viewsets.ModelViewSet):
 
 
 # ── StockCamion ──────────────────────────────────────────────────────────────
-class StockCamionViewSet(viewsets.ModelViewSet):
+class StockCamionViewSet(viewsets.ReadOnlyModelViewSet):
+    # Solo lectura: el saldo del camión cambia únicamente con pedidos,
+    # devoluciones, inventarios y liquidaciones, que dejan registro.
     serializer_class   = StockCamionSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -1353,7 +1355,9 @@ class AlmacenViewSet(viewsets.ModelViewSet):
 
 
 # ── StockAlmacen ─────────────────────────────────────────────────────────────
-class StockAlmacenViewSet(viewsets.ModelViewSet):
+class StockAlmacenViewSet(viewsets.ReadOnlyModelViewSet):
+    # Solo lectura: el stock del almacén cambia con ingresos, despachos y
+    # devoluciones aprobadas, que dejan registro.
     serializer_class   = StockAlmacenSerializer
     permission_classes = [permissions.IsAuthenticated]
 
