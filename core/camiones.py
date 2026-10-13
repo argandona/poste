@@ -15,9 +15,11 @@ El rendimiento: entre dos cargas de tanque lleno es exacto; si en el mes no
 hay dos, se aproxima con km del mes / combustible cargado en el mes.
 """
 import io
+import json
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models, transaction
 from django.utils import timezone
 from rest_framework import permissions, viewsets
@@ -28,8 +30,8 @@ from rest_framework.response import Response
 from .errores import ErrorNegocio
 from .fotos import guardar_foto, leer_base64, responder_foto
 from .models import (
-    SST, Camion, CargaCombustible, JornadaCamion, JornadaSST, Rol, SSTEncargado,
-    Usuario, UsuarioCamion,
+    SST, Camion, CargaCombustible, JornadaCamion, JornadaSST, KmEliminado, Rol,
+    SSTEncargado, Usuario, UsuarioCamion,
 )
 
 # Por debajo de este tanto de su promedio, el rendimiento avisa.
@@ -358,8 +360,59 @@ def informe_mensual(anio, mes, empresa_id=None, camion_id=None, hoy=None):
             'alerta': bool(variacion is not None
                            and r['rendimiento'] < promedio * UMBRAL_ALERTA),
         })
+    eliminados = (KmEliminado.objects
+                  .filter(fecha_hora__date__gte=desde, fecha_hora__date__lte=hasta)
+                  .select_related('camion', 'usuario'))
+    if empresa_id:
+        eliminados = eliminados.filter(camion__empresa_id=empresa_id)
+    if camion_id:
+        eliminados = eliminados.filter(camion_id=camion_id)
     return {'anio': anio, 'mes': mes, 'desde': desde, 'hasta': hasta,
-            'camiones': filas}
+            'camiones': filas,
+            'eliminados': [datos_eliminado(e) for e in eliminados]}
+
+
+def datos_eliminado(e):
+    d = e.datos
+    return {
+        'id_km_eliminado': e.pk,
+        'fecha_hora': e.fecha_hora,
+        'usuario_nombre': e.usuario.nombre,
+        'camion_placa': e.camion.placa,
+        'tipo': e.tipo,
+        'tipo_texto': e.get_tipo_display(),
+        'fecha_registro': d.get('fecha') or (d.get('fecha_hora') or '')[:10],
+        'chofer_nombre': d.get('chofer_nombre', ''),
+        'km': (f"{d.get('km_salida')} → {d.get('km_cierre') if d.get('km_cierre') is not None else 'sin cierre'}"
+               if e.tipo == 'salida' else str(d.get('km'))),
+        'cargas_incluidas': len(d.get('cargas') or []) if e.tipo == 'salida' else 0,
+        'motivo': e.motivo,
+    }
+
+
+def eliminar_registro(actor, objeto, motivo):
+    """Borra una salida (con sus cargas) o una carga, y deja el acta."""
+    if not actor.es_superadmin():
+        raise PermissionDenied('Solo el SuperAdmin elimina registros de km.')
+    motivo = (motivo or '').strip()
+    if not motivo:
+        raise ErrorNegocio('Escribe por qué se elimina.')
+    if isinstance(objeto, JornadaCamion):
+        tipo = 'salida'
+        datos = datos_jornada(objeto)
+        datos['foto_salida'], datos['foto_cierre'] = objeto.foto_salida, objeto.foto_cierre
+        datos['cargas'] = [{**datos_carga(c), 'foto': c.foto} for c in objeto.cargas.all()]
+    else:
+        tipo = 'carga'
+        datos = {**datos_carga(objeto), 'foto': objeto.foto}
+    with transaction.atomic():
+        acta = KmEliminado.objects.create(
+            camion=objeto.camion, tipo=tipo, usuario=actor, motivo=motivo,
+            datos=json.loads(json.dumps(datos, cls=DjangoJSONEncoder)))
+        if tipo == 'salida':
+            objeto.cargas.all().delete()
+        objeto.delete()
+    return acta
 
 
 MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio',
@@ -438,6 +491,15 @@ def informe_excel(informe):
            'Sí' if k['tanque_lleno'] else 'No', k['grifo']]
           for c in informe['camiones'] for k in c['cargas']],
          [11, 11, 7, 22, 10, 12, 10, 8, 10, 12, 12, 24])
+    hoja(wb.create_sheet('Eliminados'),
+         ['Eliminado el', 'Hora', 'Por', 'Placa', 'Qué', 'Fecha del registro',
+          'Chofer', 'Km', 'Cargas incluidas', 'Motivo'],
+         [[timezone.localtime(e['fecha_hora']).date(), hora(e['fecha_hora']),
+           e['usuario_nombre'], e['camion_placa'], e['tipo_texto'],
+           e['fecha_registro'], e['chofer_nombre'], e['km'],
+           e['cargas_incluidas'] or '', e['motivo']]
+          for e in informe.get('eliminados', [])],
+         [12, 7, 22, 11, 20, 16, 22, 20, 14, 40])
 
     salida = io.BytesIO()
     wb.save(salida)
@@ -626,6 +688,19 @@ class JornadaCamionViewSet(viewsets.ViewSet):
         j.save(update_fields=['km_cierre', 'foto_cierre', 'hora_cierre', 'observacion'])
         return Response(datos_jornada(_jornadas_con_todo(JornadaCamion.objects).get(pk=j.pk)))
 
+    @action(detail=True, methods=['post'])
+    def eliminar(self, request, pk=None):
+        """POST /api/jornadas-camion/{id}/eliminar/ {motivo} — solo el
+        SuperAdmin. Borra la salida y sus cargas, y deja el acta."""
+        actor = _actor(request)
+        if not actor.es_superadmin():
+            raise PermissionDenied('Solo el SuperAdmin elimina registros de km.')
+        j = _jornadas_con_todo(self._visibles(actor)).filter(pk=pk).first()
+        if j is None:
+            raise ErrorNegocio('Esa salida no existe.')
+        acta = eliminar_registro(actor, j, request.data.get('motivo'))
+        return Response(datos_eliminado(acta))
+
     @action(detail=True, methods=['get'])
     def foto(self, request, pk=None):
         """GET /api/jornadas-camion/{id}/foto/?cual=salida|cierre"""
@@ -726,6 +801,19 @@ class CargaCombustibleViewSet(viewsets.ViewSet):
                 grifo=(d.get('grifo') or '').strip()[:150], foto=archivo)
         alerta = revisar_alerta(carga)
         return Response({**datos_carga(carga), 'alerta': alerta}, status=201)
+
+    @action(detail=True, methods=['post'])
+    def eliminar(self, request, pk=None):
+        """POST /api/cargas-combustible/{id}/eliminar/ {motivo} — solo el
+        SuperAdmin. Borra la carga y deja el acta."""
+        actor = _actor(request)
+        if not actor.es_superadmin():
+            raise PermissionDenied('Solo el SuperAdmin elimina registros de km.')
+        c = self._visibles(actor).filter(pk=pk).first()
+        if c is None:
+            raise ErrorNegocio('Esa carga no existe.')
+        acta = eliminar_registro(actor, c, request.data.get('motivo'))
+        return Response(datos_eliminado(acta))
 
     @action(detail=True, methods=['get'])
     def foto(self, request, pk=None):
