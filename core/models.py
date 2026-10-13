@@ -1304,3 +1304,21 @@ class CargaCombustible(models.Model):
 
     def __str__(self):
         return f"{self.camion} | {self.fecha_hora:%Y-%m-%d} | {self.cantidad} {self.combustible}"
+
+
+class KmEliminado(models.Model):
+    """Acta de una salida o carga de combustible borrada por error. Solo el
+    SuperAdmin borra; aquí queda quién, cuándo, por qué y qué decía el
+    registro (con sus fotos), para que el informe no cambie sin rastro."""
+    TIPOS = [("salida", "Salida"), ("carga", "Carga de combustible")]
+    id_km_eliminado = models.AutoField(primary_key=True)
+    camion     = models.ForeignKey(Camion,  on_delete=models.PROTECT, related_name="km_eliminados")
+    tipo       = models.CharField(max_length=10, choices=TIPOS)
+    usuario    = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name="km_eliminados")
+    fecha_hora = models.DateTimeField(auto_now_add=True)
+    motivo     = models.TextField()
+    datos      = models.JSONField()
+
+    class Meta:
+        db_table = "km_eliminado"
+        ordering = ["-fecha_hora"]

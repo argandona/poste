@@ -13,7 +13,7 @@ from django.core.management import call_command
 from django.utils import timezone
 
 from ..models import (
-    SST, CargaCombustible, JornadaCamion, Rol, SSTEncargado, Usuario,
+    SST, CargaCombustible, JornadaCamion, KmEliminado, Rol, SSTEncargado, Usuario,
 )
 from .base import BaseAPITestCase
 
@@ -227,7 +227,7 @@ class CamionesTests(BaseAPITestCase):
         r = self.client.get(f'{J}informe/', {'anio': hoy.year, 'mes': hoy.month,
                                              'formato': 'xlsx'})
         libro = openpyxl.load_workbook(io.BytesIO(r.content))
-        self.assertEqual(libro.sheetnames, ['Resumen', 'Salidas', 'Combustible'])
+        self.assertEqual(libro.sheetnames, ['Resumen', 'Salidas', 'Combustible', 'Eliminados'])
         self.assertEqual(libro['Resumen']['A4'].value, 'ABC-123')
         salidas = libro['Salidas']
         col = [c.value for c in salidas[3]].index('Distrito') + 1
@@ -265,3 +265,65 @@ class CamionesTests(BaseAPITestCase):
         self.assertEqual(r.status_code, 400)
         self.assertIn('Invalid api_key', r.json()['detail'])
         self.assertFalse(JornadaCamion.objects.exists())
+
+    # ── Eliminar un km registrado por error ──────────────────────────────────
+
+    def superadmin(self):
+        return Usuario.objects.create(
+            nombre='Admin', email='admin@x.com', clave='x',
+            rol=Rol.objects.create(id_rol=Rol.SUPERADMIN, descripcion='SuperAdmin'))
+
+    def test_el_superadmin_elimina_una_salida_errada_y_queda_el_acta(self):
+        jid = self.salir(150000).json()['id_jornada']
+        self.cargar(150020)
+        self.cerrar(jid, 150050)
+        admin = self.superadmin()
+        self.auth(admin)
+        self.assertIn('por qué', self.client.post(f'{J}{jid}/eliminar/', {}, format='json')
+                      .json()['detail'])
+        r = self.client.post(f'{J}{jid}/eliminar/', {'motivo': 'Km mal escrito'}, format='json')
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual((r.json()['km'], r.json()['cargas_incluidas']), ('150000 → 150050', 1))
+        self.assertFalse(JornadaCamion.objects.exists())
+        self.assertFalse(CargaCombustible.objects.exists())
+        acta = KmEliminado.objects.get()
+        self.assertEqual((acta.tipo, acta.usuario, acta.motivo, acta.camion),
+                         ('salida', admin, 'Km mal escrito', self.camion))
+        self.assertEqual(acta.datos['km_salida'], 150000)
+        self.assertTrue(acta.datos['foto_salida'] and acta.datos['cargas'][0]['foto'])
+        # Ya se puede registrar el km correcto, menor que el errado.
+        self.assertEqual(self.salir(15000).status_code, 201)
+
+    def test_el_superadmin_elimina_solo_una_carga(self):
+        jid = self.salir(1000).json()['id_jornada']
+        cid = self.cargar(9050)[0].json()['id_carga']
+        self.auth(self.superadmin())
+        r = self.client.post(f'{C}{cid}/eliminar/', {'motivo': 'Era 1050'}, format='json')
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertFalse(CargaCombustible.objects.exists())
+        self.assertTrue(JornadaCamion.objects.filter(pk=jid).exists())
+        self.assertEqual(KmEliminado.objects.get().tipo, 'carga')
+        self.assertEqual(self.cerrar(jid, 1100).status_code, 200)
+
+    def test_solo_el_superadmin_elimina(self):
+        jid = self.salir().json()['id_jornada']
+        for quien in (self.chofer, self.coordinador, self.capataz):
+            self.auth(quien)
+            r = self.client.post(f'{J}{jid}/eliminar/', {'motivo': 'x'}, format='json')
+            self.assertEqual(r.status_code, 403)
+        self.assertTrue(JornadaCamion.objects.exists())
+        self.assertFalse(KmEliminado.objects.exists())
+
+    def test_lo_eliminado_sale_en_el_excel(self):
+        jid = self.salir(150000).json()['id_jornada']
+        admin = self.superadmin()
+        self.auth(admin)
+        self.client.post(f'{J}{jid}/eliminar/', {'motivo': 'Km mal escrito'}, format='json')
+        hoy = timezone.localdate()
+        informe = self.client.get(f'{J}informe/?anio={hoy.year}&mes={hoy.month}').json()
+        self.assertEqual([e['motivo'] for e in informe['eliminados']], ['Km mal escrito'])
+        r = self.client.get(f'{J}informe/?anio={hoy.year}&mes={hoy.month}&formato=xlsx')
+        hoja = openpyxl.load_workbook(io.BytesIO(r.content))['Eliminados']
+        fila = [c.value for c in hoja[4]]
+        self.assertEqual(fila[2:5], ['Admin', 'ABC-123', 'Salida'])
+        self.assertEqual(fila[-1], 'Km mal escrito')
