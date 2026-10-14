@@ -127,6 +127,18 @@ class CuadernoReforzamientoTests(BaseAPITestCase):
         self.assertIn('0.9 x 0.9', escrito)
         self.assertIn('1 x 1 (10 cm)', escrito)
 
+    def test_con_vereda_tambien_lleva_el_grass(self):
+        self.liquidar(medidas={'panos': {'vereda_10': [[1, 1]],
+                                         'grass': [[0.5, 2]]}})
+        [h] = reunir_reforzamiento(self.sst)
+        self.assertTrue(h.con_vereda)
+        self.assertEqual(h.grass, '0.5 x 2')
+        c = mock.MagicMock()
+        _pagina(c, h)
+        escrito = [llamada.args[2] for llamada in c.drawCentredString.call_args_list
+                   if len(llamada.args) > 2]
+        self.assertIn('0.5 x 2', escrito)
+
     def test_lo_que_no_entra_se_junta_en_el_ultimo_renglon(self):
         self.assertEqual(en_renglones(['a', 'b', 'c', 'd'], 3),
                          ['a', 'b', 'c; d'])
