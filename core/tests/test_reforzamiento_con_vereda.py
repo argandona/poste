@@ -50,13 +50,13 @@ class ReforzamientoConVeredaTests(BaseAPITestCase):
                  .values_list("actividad__nombre", flat=True)),
             ["Reforzamiento de poste con vereda"])
 
-    def test_lleva_las_dieciseis_partidas_en_el_orden_de_la_obra(self):
+    def test_lleva_las_dieciocho_partidas_en_el_orden_de_la_obra(self):
         tipo = self.configurar()
         codigos = [p.mano_de_obra.partida for p in tipo.partidas.all()]
         self.assertEqual(codigos, [
             "*094395", "*090248", "*090251", "*095266", "*095275", "*095280",
-            "*091842", "*091845", "*094919", "*091830", "*095230", "*098203",
-            "*098822", "*090633", "*099090", "*091673"])
+            "*091842", "*091845", "*094919", "*091830", "*095230", "*091800",
+            "*020000", "*098203", "*098822", "*090633", "*099090", "*091673"])
 
     def test_la_inspeccion_y_el_reforzamiento_arrancan_en_uno(self):
         tipo = self.configurar()
@@ -133,7 +133,7 @@ class ReforzamientoConVeredaTests(BaseAPITestCase):
     def test_se_puede_repetir(self):
         self.configurar()
         tipo = self.configurar()
-        self.assertEqual(tipo.partidas.count(), 16)
+        self.assertEqual(tipo.partidas.count(), 18)
         self.assertEqual(tipo.materiales.count(), 11)
 
     # ── Las medidas viajan con la liquidación ────────────────────────────────

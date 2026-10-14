@@ -3,7 +3,9 @@
 Calca el formato de Encossa "Cuaderno de obra rehabilitacion de poste.xlsx":
 un encabezado con la SST y los responsables, y dos columnas de casillas, una
 para el reforzamiento con vereda y otra para el sin vereda. Se llena solo la
-columna del tipo liquidado; la otra queda en blanco, como en el papel.
+columna del tipo liquidado; la otra queda en blanco, como en el papel. La
+excepción es el piso especial: si en un reforzamiento con vereda también se
+dañó piso especial, sus paños van en los renglones PISO ESPECIAL.
 
 Solo vale para las dos actividades de reforzamiento. Las demás siguen con el
 cuaderno de `cuaderno_obra`.
@@ -316,7 +318,9 @@ def _pagina(c, h):
 
     y -= 0.2 * cm
     panos = con.panos or [''] * RENGLONES_VEREDA
-    pisos = sin.pisos or [''] * RENGLONES_PISO
+    # El piso especial se llena en los dos tipos: con vereda también puede
+    # haberse dañado piso especial al lado.
+    pisos = h.pisos or [''] * RENGLONES_PISO
     izquierda = [(f'PAÑO 0{i + 1}', p) for i, p in enumerate(panos)] + [
         ('PISTA', con.pista), ('ASFALTO', con.asfalto)]
     derecha = [(f'PISO ESPECIAL 0{i + 1}', p) for i, p in enumerate(pisos)] + [

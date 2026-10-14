@@ -8,7 +8,7 @@ con lo de siempre.
 from datetime import date
 from unittest import mock
 
-from ..cuaderno_reforzamiento import (VACIO, _casilla, _subrayado,
+from ..cuaderno_reforzamiento import (VACIO, _casilla, _pagina, _subrayado,
                                       en_renglones, generar_pdf_reforzamiento,
                                       reunir_reforzamiento)
 from ..models import (SST, Actividad, ConsumoMaterialSuministro,
@@ -112,6 +112,20 @@ class CuadernoReforzamientoTests(BaseAPITestCase):
         self.liquidar()
         [h] = reunir_reforzamiento(self.sst)
         self.assertEqual(h.observacion, '')
+
+    def test_con_vereda_tambien_lleva_el_piso_especial(self):
+        self.liquidar(medidas={'panos': {'vereda_10': [[1, 1]],
+                                         'piso_especial': [[0.9, 0.9]]}})
+        [h] = reunir_reforzamiento(self.sst)
+        self.assertTrue(h.con_vereda)
+        self.assertEqual(h.panos, ['1 x 1 (10 cm)', '', ''])
+        self.assertEqual(h.pisos, ['0.9 x 0.9', ''])
+        c = mock.MagicMock()
+        _pagina(c, h)
+        escrito = [llamada.args[2] for llamada in c.drawCentredString.call_args_list
+                   if len(llamada.args) > 2]
+        self.assertIn('0.9 x 0.9', escrito)
+        self.assertIn('1 x 1 (10 cm)', escrito)
 
     def test_lo_que_no_entra_se_junta_en_el_ultimo_renglon(self):
         self.assertEqual(en_renglones(['a', 'b', 'c', 'd'], 3),
