@@ -1322,3 +1322,21 @@ class KmEliminado(models.Model):
     class Meta:
         db_table = "km_eliminado"
         ordering = ["-fecha_hora"]
+
+
+class VersionApp(models.Model):
+    """Una versión publicada de la app. Al abrir, la app pregunta por la última
+    y, si la suya es más vieja, ofrece actualizar desde `url_apk`. Si alguna
+    versión más nueva que la del celular es obligatoria, no deja seguir."""
+    id_version  = models.AutoField(primary_key=True)
+    codigo      = models.PositiveIntegerField(unique=True)  # el +N del pubspec
+    nombre      = models.CharField(max_length=20)            # el 1.0.N del pubspec
+    url_apk     = models.URLField(max_length=1000)
+    notas       = models.TextField(blank=True, default="")
+    obligatoria = models.BooleanField(default=False)
+    usuario     = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name="versiones_app")
+    fecha_hora  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "version_app"
+        ordering = ["-codigo"]
