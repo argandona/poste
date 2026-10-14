@@ -126,6 +126,9 @@ CATALOGO_CON_VEREDA = {
         "*094919": 0,  # cimentación complementaria: se pregunta
         "*091830": 0,  # rotura de pista = m² de sus paños
         "*095230": 0,  # reparación de asfalto = m² de sus paños / 0.60
+        # El piso especial dañado junto a la vereda (pedido del 2026-10-14).
+        "*091800": 0,  # reparación de piso especial = m² de sus paños
+        "*020000": 0,  # reposición de piso = 1 si se compró
         "*098203": 0,  # tubo corrugado: se pregunta
         "*098822": 0,  # rotura de cimentación: se pregunta
         "*090633": 0,  # acarreo = metros por viajes
