@@ -9,7 +9,8 @@ Lo que mueve el saldo del camión, y de dónde se lee:
 - **Pedido aprobado** (+): `DetallePedido.cantidad_aprobada`, a la fecha de
   aprobación.
 - **Asignación de agregado** (+): `AsignacionAgregado` no anulada (la anulada
-  devolvió las bolsas, así que neta es cero).
+  devolvió las bolsas, así que neta es cero). Las del mismo día van juntas en
+  una columna.
 - **Liquidación** (−): `ConsumoMaterialSuministro`. No guarda el camión: se
   descontó del camión que tenía asignado quien liquidó ese día, así que se
   toman los consumos de los responsables del camión dentro de su periodo.
@@ -95,12 +96,17 @@ def movimientos(camion):
                 orden=1)
         sumar(m, d.material_id, d.cantidad_aprobada)
 
+    # Las asignaciones van una por material; en la matriz se juntan las del
+    # mismo día en una sola columna, con todos sus números.
     for a in (AsignacionAgregado.objects
               .filter(camion=camion, anulada=False, cantidad__gt=0)
-              .select_related('usuario')):
-        m = mov(('agregado', a.pk), fecha=_dia(a.fecha), tipo='Asignación',
-                documento=f'N° {a.pk}', responsable=a.usuario.nombre, clase=ENTRA,
-                orden=2)
+              .select_related('usuario').order_by('fecha', 'pk')):
+        dia = _dia(a.fecha)
+        m = mov(('agregado', dia), fecha=dia, tipo='Asignación', documento='',
+                responsable='', clase=ENTRA, orden=2)
+        m.documento = f'{m.documento}, {a.pk}' if m.documento else f'N° {a.pk}'
+        if a.usuario.nombre not in m.responsable.split(', '):
+            m.responsable = ', '.join(x for x in (m.responsable, a.usuario.nombre) if x)
         sumar(m, a.material_id, a.cantidad)
 
     filtro = Q(pk__in=[])

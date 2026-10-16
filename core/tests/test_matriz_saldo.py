@@ -8,6 +8,7 @@ from openpyxl import load_workbook
 
 from ..matriz_saldo import ENTRA, SALE, matriz
 from ..models import (
+    AsignacionAgregado,
     ConsumoMaterialSuministro, DetalleDevolucion, DetallePedido, Devolucion,
     LiquidacionSuministro, Pedido, StockCamion, TipoTrabajo, Usuario,
 )
@@ -67,6 +68,23 @@ class MatrizSaldoTests(BaseAPITestCase):
             liquidacion=liq, material=self.material_a, usuario=otro, cantidad=7)
         [fila] = matriz(self.camion)[1]
         self.assertEqual(fila['calculado'], 5)
+
+    def test_las_asignaciones_del_mismo_dia_van_en_una_columna(self):
+        for material, cantidad in ((self.material_a, 4), (self.material_b, 6),
+                                   (self.material_b, 1)):
+            AsignacionAgregado.objects.create(
+                almacen=self.almacen, camion=self.camion, material=material,
+                cantidad=cantidad, usuario=self.capataz, registrado_por=self.encargado,
+                origen=AsignacionAgregado.ORIGEN_ALMACEN)
+        movs, filas = matriz(self.camion)
+        asignaciones = [m for m in movs if m.tipo == 'Asignación']
+        self.assertEqual(len(asignaciones), 1)
+        [a] = asignaciones
+        self.assertEqual(a.documento.count(','), 2)
+        self.assertEqual(a.responsable, 'Capataz Uno')
+        self.assertEqual(a.cantidades, {self.material_a.pk: 4, self.material_b.pk: 7})
+        self.assertEqual({f['matricula']: f['calculado'] for f in filas},
+                         {'MAT-A': 9, 'MAT-B': 7})
 
     def test_el_almacen_baja_el_excel(self):
         self.auth(self.encargado)
