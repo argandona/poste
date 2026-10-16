@@ -281,6 +281,29 @@ class StockCamionViewSet(viewsets.ReadOnlyModelViewSet):
         return qs
 
     @action(detail=False, methods=['get'])
+    def matriz(self, request):
+        """GET /api/stock-camion/matriz/?camion=<id> — Excel con cada
+        movimiento del camión por material y el saldo que debería tener. Lo
+        baja el almacén, el SuperAdmin o quien haya sido responsable del camión."""
+        from django.http import HttpResponse
+        from ..matriz_saldo import matriz_excel
+
+        camion = Camion.objects.filter(pk=request.query_params.get('camion')).first()
+        if camion is None:
+            return Response({'detail': 'Elige el camión.'}, status=400)
+        actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
+        fue_suyo = UsuarioCamion.objects.filter(camion=camion, usuario=actor).exists()
+        if not (actor and (actor.puede_gestionar_almacen() or fue_suyo)):
+            return Response({'detail': 'Solo el almacén o el responsable del camión.'},
+                            status=403)
+        r = HttpResponse(
+            matriz_excel(camion),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        r['Content-Disposition'] = (
+            f'attachment; filename="saldo_{camion.placa}_{datetime.date.today():%Y%m%d}.xlsx"')
+        return r
+
+    @action(detail=False, methods=['get'])
     def por_camion(self, request):
         """
         GET /api/stock-camion/por_camion/
