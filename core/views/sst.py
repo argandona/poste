@@ -12,11 +12,16 @@ class SSTViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def mis_sst(self, request):
-        """GET /api/ssts/mis_sst/?usuario=<id> — SSTs donde el usuario es encargado."""
+        """GET /api/ssts/mis_sst/?usuario=<id>&pendientes=1 — SSTs donde el
+        usuario es encargado. Con `pendientes`, sin las que ya liquidó entera
+        (es lo que ofrece el IPC: lo liquidado ya se ejecutó con su IPC)."""
         usuario_id = request.query_params.get('usuario')
         if not usuario_id:
             return Response({'detail': 'Parámetro usuario requerido.'}, status=400)
-        sst_ids = SSTEncargado.objects.filter(usuario_id=usuario_id).values_list('sst_id', flat=True)
+        sst_ids = set(SSTEncargado.objects.filter(usuario_id=usuario_id)
+                      .values_list('sst_id', flat=True))
+        if request.query_params.get('pendientes'):
+            sst_ids -= ssts_ya_liquidadas(usuario_id, sst_ids)
         ssts = SST.objects.filter(id_sst__in=sst_ids).select_related('empresa', 'actividad')
         return Response(SSTSerializer(ssts, many=True).data)
 

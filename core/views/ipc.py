@@ -130,6 +130,10 @@ class IPCViewSet(viewsets.ViewSet):
         if (not actor.es_superadmin() and actor.empresa_id
                 and sst.empresa_id != actor.empresa_id):
             raise ErrorNegocio('Esa SST es de otra empresa.')
+        # Una SST no se ejecuta sin IPC: si ya la liquidó, ya tuvo el suyo.
+        if ssts_ya_liquidadas(actor, [sst.pk]):
+            raise ErrorNegocio(f'La SST {sst.codigo or sst.sst} ya está liquidada: '
+                               'ya se ejecutó con su IPC.')
         return sst
 
     @staticmethod

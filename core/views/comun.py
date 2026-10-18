@@ -120,6 +120,20 @@ def _suministros_asignados_usuario(usuario, fecha_desde=None, fecha_hasta=None):
     return out
 
 # Alias para no tocar el resto de las vistas que ya llamaban a este nombre.
+def ssts_ya_liquidadas(usuario, sst_ids=None):
+    """Las SST en que el usuario ya liquidó todos sus postes: ya se ejecutaron,
+    así que ya tuvieron su IPC y no se ofrecen para uno nuevo. Una SST sin
+    postes suyos todavía (los agrega en campo) no cuenta como liquidada."""
+    qs = SSTSuministro.objects.filter(asignado_a=usuario)
+    if sst_ids is not None:
+        qs = qs.filter(sst_id__in=sst_ids)
+    con_postes = set(qs.values_list('sst_id', flat=True))
+    pendientes = set(qs.filter(suministro__estado='asignado',
+                               suministro__liquidaciones__isnull=True)
+                     .values_list('sst_id', flat=True))
+    return con_postes - pendientes
+
+
 def _render_suministros(nombre_usuario, fecha_desde=None, fecha_hasta=None):
     usuario = Usuario.objects.filter(nombre=nombre_usuario).first()
     if usuario is None:
