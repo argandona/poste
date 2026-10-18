@@ -180,11 +180,16 @@ class IPCViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get', 'put'])
     def contacto_emergencia(self, request):
-        """GET|PUT /api/ipcs/contacto_emergencia/
+        """GET|PUT /api/ipcs/contacto_emergencia/?empresa=<id>
 
-        Los contactos que el IPC trae precargados. Editarlos: SuperAdmin."""
+        Los contactos que el IPC trae precargados. Editarlos: SuperAdmin, que
+        no es de ninguna empresa y por eso dice cuál (`empresa` en la consulta
+        o en el cuerpo); los demás ven los de la suya."""
         actor = self._actor(request)
-        empresa_id = request.data.get('empresa') or actor.empresa_id
+        empresa_id = actor.empresa_id
+        if actor.es_superadmin():
+            empresa_id = (request.data.get('empresa')
+                          or request.query_params.get('empresa') or empresa_id)
         if request.method == 'PUT':
             if not actor.es_superadmin():
                 raise PermissionDenied('Solo el SuperAdmin edita los contactos.')
