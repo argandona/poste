@@ -248,6 +248,39 @@ class IPCTests(BaseAPITestCase):
                              {'sst': self.sst1.pk}, format='json')
         self.assertEqual(r.status_code, 400)
 
+    def test_una_sst_escrita_a_mano(self):
+        r, _ = self.crear(ssts=[{'sst': self.sst1.pk},
+                                {'codigo': ' sst-9000 ', 'direccion': 'Jr. Luna 5'}])
+        self.assertEqual(r.status_code, 201, r.content)
+        ssts = r.json()['ssts']
+        self.assertEqual([(s['sst'], s['manual'], s['id_sst']) for s in ssts],
+                         [('SST-1', False, self.sst1.pk), ('SST-9000', True, None)])
+        ipc_id = r.json()['id_ipc']
+        # No crea una SST en el sistema.
+        self.assertFalse(SST.objects.filter(codigo__iexact='SST-9000').exists())
+        # Repetida, aunque se escriba distinto, no entra.
+        r = self.client.post(f'{URL}{ipc_id}/agregar_sst/', {'codigo': 'Sst-9000'},
+                             format='json')
+        self.assertEqual(r.status_code, 400)
+        # Escribir el código de una SST que existe la enlaza (y ya estaba).
+        r = self.client.post(f'{URL}{ipc_id}/agregar_sst/', {'codigo': 'sst-1'},
+                             format='json')
+        self.assertEqual(r.status_code, 400)
+        r = self.client.post(f'{URL}{ipc_id}/agregar_sst/', {'codigo': 'SST-2'},
+                             format='json')
+        self.assertEqual(r.json()['ssts'][-1]['id_sst'], self.sst2.pk)
+        # Al liquidar la manual, el aviso sabe que tiene IPC.
+        cubre = self.client.get(f'{URL}cubre/', {'sst': 'SST-9000'}).json()
+        self.assertTrue(cubre['cubierta'])
+        self.assertTrue(self.client.get(f'{URL}{ipc_id}/pdf/').content.startswith(b'%PDF'))
+
+    def test_escribir_una_sst_ya_liquidada_tampoco_entra(self):
+        self._poste(self.sst2, 'P-2', 'ejecutado')
+        r, _ = self.crear(ssts=[{'codigo': 'SST-2'}])
+        self.assertEqual(r.status_code, 400)
+        r, _ = self.crear(ssts=[{'codigo': ''}])
+        self.assertEqual(r.status_code, 400)
+
     def test_el_centro_medico_lo_escribe_el_responsable(self):
         r, _ = self.crear(centro_medico='  Hospital de Surco ')
         e = r.json()['datos']['emergencia']

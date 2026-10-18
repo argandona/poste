@@ -57,7 +57,8 @@ class IPCViewSet(viewsets.ViewSet):
             'puedo_editar': (ipc.responsable_id == actor.pk and ipc.fecha == hoy
                              and ipc.estado == 'abierto'),
             'mi_estado': mio.estado if mio else None,
-            'ssts': [{'id_sst': s.sst_id, 'sst': s.sst.codigo or s.sst.sst,
+            'ssts': [{'id_sst': s.sst_id, 'sst': s.codigo,
+                      'manual': s.sst_id is None,
                       'direccion': s.direccion, 'agregada': s.agregada}
                      for s in ipc.ssts.all()],
             'participantes': [{
@@ -136,14 +137,39 @@ class IPCViewSet(viewsets.ViewSet):
                                'ya se ejecutó con su IPC.')
         return sst
 
+    @classmethod
+    def _sst_de(cls, actor, item):
+        """De {sst: id} (una asignada) o {codigo: '...'} (escrita a mano):
+        (SST o None, código). Si el código escrito ya es una SST de la empresa,
+        se enlaza a esa, con las mismas reglas."""
+        item = item if isinstance(item, dict) else {}
+        if item.get('sst'):
+            sst = cls._sst(actor, item['sst'])
+            return sst, sst.codigo or sst.sst
+        codigo = str(item.get('codigo') or '').strip().upper()
+        if not codigo:
+            raise ErrorNegocio('Elige una SST o escribe su código.')
+        if len(codigo) > 20:
+            raise ErrorNegocio('El código de la SST es muy largo.')
+        existente = SST.objects.filter(
+            models.Q(codigo__iexact=codigo) | models.Q(sst__iexact=codigo),
+            empresa_id=actor.empresa_id).first() if actor.empresa_id else None
+        if existente:
+            return cls._sst(actor, existente.pk), codigo
+        return None, codigo
+
     @staticmethod
-    def _sumar_sst(ipc, sst, direccion=''):
-        orden = ipc.ssts.count()
-        fila, nueva = IPCSST.objects.get_or_create(
-            ipc=ipc, sst=sst,
-            defaults={'direccion': (direccion or sst.distrito or '').strip()[:250],
-                      'orden': orden})
-        return fila, nueva
+    def _sumar_sst(ipc, sst, codigo, direccion=''):
+        repetida = models.Q(codigo__iexact=codigo)
+        if sst is not None:
+            repetida |= models.Q(sst=sst)
+        fila = ipc.ssts.filter(repetida).first()
+        if fila:
+            return fila, False
+        fila = IPCSST.objects.create(
+            ipc=ipc, sst=sst, codigo=codigo, orden=ipc.ssts.count(),
+            direccion=(direccion or (sst.distrito if sst else '') or '').strip()[:250])
+        return fila, True
 
     # ── Endpoints ───────────────────────────────────────────────────────────
     @action(detail=False, methods=['get'])
@@ -220,7 +246,8 @@ class IPCViewSet(viewsets.ViewSet):
 
     def create(self, request):
         """POST /api/ipcs/
-        {tarea, coordinador?, centro_medico?, datos, ssts: [{sst, direccion?}],
+        {tarea, coordinador?, centro_medico?, datos,
+         ssts: [{sst | codigo, direccion?}],
          participantes: [usuario, ...]}
 
         El responsable entra solo como participante, ya conforme. Los contactos
@@ -247,7 +274,7 @@ class IPCViewSet(viewsets.ViewSet):
         participantes = [self._candidato(actor, u)
                          for u in request.data.get('participantes') or []
                          if str(u) != str(actor.pk)]
-        lista_ssts = [(self._sst(actor, s.get('sst')), s.get('direccion', ''))
+        lista_ssts = [(*self._sst_de(actor, s), s.get('direccion', ''))
                       for s in ssts if isinstance(s, dict)]
         datos = limpiar_datos(request.data.get('datos'))
         contacto = ContactoEmergencia.objects.filter(
@@ -262,8 +289,8 @@ class IPCViewSet(viewsets.ViewSet):
                 coordinador=coordinador, fecha=timezone.localdate(),
                 tarea=tarea[:2000], formato_codigo=CODIGO,
                 formato_version=VERSION, datos=datos)
-            for sst, direccion in lista_ssts:
-                self._sumar_sst(ipc, sst, direccion)
+            for sst, codigo, direccion in lista_ssts:
+                self._sumar_sst(ipc, sst, codigo, direccion)
             self._sumar_participante(ipc, actor, conforme=True)
             for u in participantes:
                 self._sumar_participante(ipc, u)
@@ -297,14 +324,15 @@ class IPCViewSet(viewsets.ViewSet):
 
     @action(detail=True, methods=['post'])
     def agregar_sst(self, request, pk=None):
-        """POST /api/ipcs/{id}/agregar_sst/ {sst, direccion?}
+        """POST /api/ipcs/{id}/agregar_sst/ {sst | codigo, direccion?}
 
-        Usar el IPC de hoy en la siguiente SST: se conservan las anteriores."""
+        Usar el IPC de hoy en la siguiente SST: se conservan las anteriores.
+        Una asignada (`sst`) o una escrita a mano (`codigo`)."""
         actor, ipc = self._mio_editable(request, pk)
-        sst = self._sst(actor, request.data.get('sst'))
-        _, nueva = self._sumar_sst(ipc, sst, request.data.get('direccion', ''))
+        sst, codigo = self._sst_de(actor, request.data)
+        _, nueva = self._sumar_sst(ipc, sst, codigo, request.data.get('direccion', ''))
         if not nueva:
-            raise ErrorNegocio(f'La SST {sst.codigo or sst.sst} ya está en este IPC.')
+            raise ErrorNegocio(f'La SST {codigo} ya está en este IPC.')
         return self._responder(ipc, actor)
 
     @action(detail=True, methods=['post'])
@@ -412,7 +440,8 @@ class IPCViewSet(viewsets.ViewSet):
         actor = self._actor(request)
         codigo = (request.query_params.get('sst') or '').strip()
         cubre = IPCSST.objects.filter(
-            models.Q(sst__codigo=codigo) | models.Q(sst__sst=codigo),
+            models.Q(codigo__iexact=codigo) | models.Q(sst__codigo=codigo) |
+            models.Q(sst__sst=codigo),
             ipc__fecha=timezone.localdate()).filter(
             models.Q(ipc__responsable=actor) |
             models.Q(ipc__participantes__usuario=actor)).exists() if codigo else False
