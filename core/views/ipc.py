@@ -173,6 +173,10 @@ class IPCViewSet(viewsets.ViewSet):
         return Response(self._contacto(contacto))
 
     @staticmethod
+    def _centro_medico(request):
+        return str(request.data.get('centro_medico') or '').strip()[:200]
+
+    @staticmethod
     def _contacto(contacto):
         campos = ('superior_nombre', 'superior_telefono', 'medico_nombre',
                   'medico_telefono', 'centro_medico', 'centro_medico_telefono')
@@ -212,10 +216,13 @@ class IPCViewSet(viewsets.ViewSet):
 
     def create(self, request):
         """POST /api/ipcs/
-        {tarea, coordinador?, datos, ssts: [{sst, direccion?}],
+        {tarea, coordinador?, centro_medico?, datos, ssts: [{sst, direccion?}],
          participantes: [usuario, ...]}
 
-        El responsable entra solo como participante, ya conforme."""
+        El responsable entra solo como participante, ya conforme. Los contactos
+        de emergencia se copian de los del SuperAdmin, salvo el centro médico
+        más cercano, que depende de dónde se trabaja: lo escribe el responsable
+        (la app lo pide; sin él, queda el del SuperAdmin)."""
         from ..ipc_formato import CODIGO, VERSION, limpiar_datos
         actor = self._actor(request)
         if not actor.puede_hacer_ipc():
@@ -242,6 +249,9 @@ class IPCViewSet(viewsets.ViewSet):
         contacto = ContactoEmergencia.objects.filter(
             empresa_id=actor.empresa_id).first()
         datos['emergencia'] = self._contacto(contacto)
+        centro = self._centro_medico(request)
+        if centro:
+            datos['emergencia']['centro_medico'] = centro
         with transaction.atomic():
             ipc = IPC.objects.create(
                 empresa_id=actor.empresa_id, responsable=actor,
@@ -257,7 +267,8 @@ class IPCViewSet(viewsets.ViewSet):
         return self._responder(ipc, actor, status=201)
 
     def partial_update(self, request, pk=None):
-        """PATCH /api/ipcs/{id}/ {tarea?, coordinador?, datos?} — hoy y abierto."""
+        """PATCH /api/ipcs/{id}/ {tarea?, coordinador?, centro_medico?, datos?}
+        — hoy y abierto."""
         from ..ipc_formato import limpiar_datos
         actor, ipc = self._mio_editable(request, pk)
         if 'tarea' in request.data:
@@ -271,10 +282,12 @@ class IPCViewSet(viewsets.ViewSet):
             if c and (coordinador is None or Rol.COORDINADOR not in coordinador.roles):
                 raise ErrorNegocio('Elige un coordinador.')
             ipc.coordinador = coordinador
+        emergencia = (ipc.datos or {}).get('emergencia') or {}
+        if 'centro_medico' in request.data:
+            emergencia = {**emergencia, 'centro_medico': self._centro_medico(request)}
         if 'datos' in request.data:
-            emergencia = (ipc.datos or {}).get('emergencia')
-            ipc.datos = {**limpiar_datos(request.data.get('datos')),
-                         'emergencia': emergencia}
+            ipc.datos = limpiar_datos(request.data.get('datos'))
+        ipc.datos = {**(ipc.datos or {}), 'emergencia': emergencia}
         ipc.save()
         return self._responder(ipc, actor)
 

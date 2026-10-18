@@ -217,6 +217,28 @@ class IPCTests(BaseAPITestCase):
         self.assertTrue(r.content.startswith(b'%PDF'))
         self.assertEqual(IPCSST.objects.filter(ipc_id=ipc_id).count(), 9)
 
+    def test_el_centro_medico_lo_escribe_el_responsable(self):
+        r, _ = self.crear(centro_medico='  Hospital de Surco ')
+        e = r.json()['datos']['emergencia']
+        # Los teléfonos y el superior siguen siendo los del SuperAdmin.
+        self.assertEqual((e['centro_medico'], e['superior_telefono']),
+                         ('Hospital de Surco', '999111222'))
+        ipc_id = r.json()['id_ipc']
+        r = self.client.patch(f'{URL}{ipc_id}/', {'centro_medico': 'Clínica Norte'},
+                              format='json')
+        e = r.json()['datos']['emergencia']
+        self.assertEqual((e['centro_medico'], e['superior_nombre']),
+                         ('Clínica Norte', 'Jefe Uno'))
+        # Cambiar el formato no borra lo de emergencia.
+        r = self.client.patch(f'{URL}{ipc_id}/', {'datos': {'epp': ['casco']}},
+                              format='json')
+        self.assertEqual(r.json()['datos']['emergencia']['centro_medico'], 'Clínica Norte')
+
+    def test_sin_centro_medico_queda_el_del_superadmin(self):
+        # La app anterior no lo manda.
+        r, _ = self.crear()
+        self.assertEqual(r.json()['datos']['emergencia']['centro_medico'], 'Clínica Sur')
+
     def test_formato_y_contactos(self):
         self.auth(self.pedro)
         f = self.client.get(f'{URL}formato/').json()
