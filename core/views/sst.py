@@ -358,11 +358,16 @@ class SSTViewSet(viewsets.ModelViewSet):
             return Response({'detail': f'La actividad de la SST no es para '
                                        f'{capataz.nombre}.'}, status=400)
         with transaction.atomic():
-            SSTEncargado.objects.get_or_create(sst=sst, usuario=capataz)
+            _, nueva = SSTEncargado.objects.get_or_create(sst=sst, usuario=capataz)
             qs = SSTSuministro.objects.filter(sst=sst)
             if suministros_ids:
                 qs = qs.filter(suministro_id__in=suministros_ids)
+            # Quién tenía cada poste antes, para avisar a los dos lados.
+            antes = list(qs.exclude(asignado_a=capataz).values_list(
+                'asignado_a_id', 'suministro__numero_suministro'))
             actualizados = qs.update(asignado_a=capataz)
+            self._soltar_sin_postes(sst, {u for u, _ in antes if u})
+        self._avisar_cambios(sst, capataz, antes, ya_la_tenia=not nueva)
         return Response({
             'status': 'ok',
             'suministros_asignados': actualizados,
@@ -394,14 +399,41 @@ class SSTViewSet(viewsets.ModelViewSet):
             raise ErrorNegocio(
                 'Ya se liquidó y no se puede deshacer: ' + ', '.join(liquidados) + '.')
         with transaction.atomic():
-            quienes = set(qs.values_list('asignado_a_id', flat=True))
+            antes = list(qs.values_list('asignado_a_id',
+                                        'suministro__numero_suministro'))
+            quienes = {usuario_id for usuario_id, _ in antes}
             actualizados = qs.update(asignado_a=None)
-            for usuario_id in quienes:
-                if not SSTSuministro.objects.filter(
-                        sst=sst, asignado_a_id=usuario_id).exists():
-                    SSTEncargado.objects.filter(
-                        sst=sst, usuario_id=usuario_id).delete()
+            self._soltar_sin_postes(sst, quienes)
+        self._avisar_cambios(sst, None, antes)
         return Response({'status': 'ok', 'suministros_desasignados': actualizados})
+
+    @staticmethod
+    def _soltar_sin_postes(sst, usuario_ids):
+        """Quien se queda sin postes en la SST deja de ser su encargado, así
+        la SST ya no le aparece."""
+        for usuario_id in usuario_ids:
+            if not SSTSuministro.objects.filter(
+                    sst=sst, asignado_a_id=usuario_id).exists():
+                SSTEncargado.objects.filter(
+                    sst=sst, usuario_id=usuario_id).delete()
+
+    @staticmethod
+    def _avisar_cambios(sst, nuevo, antes, ya_la_tenia=False):
+        """Avisa a quien recibe los postes y a quienes los tenían.
+
+        `antes`: [(usuario que lo tenía o None, número del poste)] de los postes
+        que cambiaron de mano; `nuevo`: quien los recibe (None al desasignar)."""
+        from ..avisos_sst import avisar_asignacion, avisar_retiro
+        if nuevo is not None:
+            avisar_asignacion(sst, nuevo, [n for _, n in antes],
+                              ya_la_tenia=ya_la_tenia)
+        quitados = {}
+        for usuario_id, numero in antes:
+            if usuario_id:
+                quitados.setdefault(usuario_id, []).append(numero)
+        for u in Usuario.objects.filter(pk__in=quitados):
+            sigue = SSTSuministro.objects.filter(sst=sst, asignado_a=u).exists()
+            avisar_retiro(sst, u, quitados[u.pk], sigue_en_la_sst=sigue)
 
     @action(detail=False, methods=['get'])
     def pendientes_de_liquidar(self, request):
@@ -558,11 +590,15 @@ class SSTViewSet(viewsets.ModelViewSet):
                 sum_obj = Suministro.objects.create(
                     numero_suministro=numero,
                     distrito=distrito or sst.distrito, estado='asignado')
+            previo = (SSTSuministro.objects.filter(sst=sst, suministro=sum_obj)
+                      .values_list('asignado_a_id', flat=True).first())
             SSTSuministro.objects.update_or_create(
                 sst=sst, suministro=sum_obj,
                 defaults={'asignado_a': capataz},
             )
-            SSTEncargado.objects.get_or_create(sst=sst, usuario=capataz)
+            _, nueva = SSTEncargado.objects.get_or_create(sst=sst, usuario=capataz)
+            if previo and previo != capataz.pk:
+                self._soltar_sin_postes(sst, {previo})
             # La actividad decide qué tipos de trabajo verá el capataz. Es
             # dato del coordinador, pero si ya se liquidó algo no se toca.
             if actividad_id and sst.actividad_id != int(actividad_id):
@@ -573,6 +609,9 @@ class SSTViewSet(viewsets.ModelViewSet):
                 sst.actividad_id = actividad_id
                 sst.save(update_fields=['actividad'])
 
+        if previo != capataz.pk:
+            self._avisar_cambios(sst, capataz, [(previo, sum_obj.numero_suministro)],
+                                 ya_la_tenia=not nueva)
         return Response({
             'status': 'ok',
             'sst': sst.codigo,
