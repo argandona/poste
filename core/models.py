@@ -1199,10 +1199,16 @@ class IPC(models.Model):
 
 
 class IPCSST(models.Model):
-    """(16) Ubicación: cada SST que se ejecuta con este IPC."""
+    """(16) Ubicación: cada SST que se ejecuta con este IPC.
+
+    Una de las asignadas (`sst`) o una escrita a mano que no está en el
+    sistema: entonces `sst` queda vacío y vale `codigo`, tal como se escribió.
+    `codigo` siempre se guarda, también para las asignadas."""
     id_ipc_sst = models.AutoField(primary_key=True)
     ipc        = models.ForeignKey(IPC, on_delete=models.CASCADE, related_name="ssts")
-    sst        = models.ForeignKey(SST, on_delete=models.PROTECT, related_name="ipcs")
+    sst        = models.ForeignKey(SST, on_delete=models.PROTECT, related_name="ipcs",
+                                   null=True, blank=True)
+    codigo     = models.CharField(max_length=20, blank=True)
     direccion  = models.CharField(max_length=250, blank=True)
     orden      = models.PositiveIntegerField(default=0)
     agregada   = models.DateTimeField(auto_now_add=True)

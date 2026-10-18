@@ -236,7 +236,7 @@ def _seccion_c(ipc):
         filas, colWidths=[ANCHO * .4, ANCHO * .15, ANCHO * .2, ANCHO * .25]), GRIS)
 
     # (16) Ubicación: 8 renglones; lo que pasa va en la misma fila con guion.
-    ssts = [f'{s.sst.codigo or s.sst.sst}' + (f' · {s.direccion}' if s.direccion else '')
+    ssts = [s.codigo + (f' · {s.direccion}' if s.direccion else '')
             for s in ipc.ssts.all()]
     renglones = ['' for _ in range(F.RENGLONES_UBICACION)]
     for i, texto in enumerate(ssts):
