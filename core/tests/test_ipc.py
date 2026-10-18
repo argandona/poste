@@ -248,6 +248,21 @@ class IPCTests(BaseAPITestCase):
                              {'sst': self.sst1.pk}, format='json')
         self.assertEqual(r.status_code, 400)
 
+    def test_etapas_de_plantilla_en_su_orden_y_mas_de_10(self):
+        self.auth(self.capataz)
+        [plantilla] = self.client.get(f'{URL}formato/').json()['plantillas_etapas']
+        self.assertIn('reforzamiento de poste', plantilla['claves'])
+        self.assertEqual(len(plantilla['etapas']), 9)
+        # Las 9 marcadas más tres propias, una metida en medio: se guardan en
+        # ese orden y el PDF les hace sitio.
+        etapas = plantilla['etapas'][:4] + ['Retiro de poste viejo'] + \
+            plantilla['etapas'][4:] + ['Extra 1', 'Extra 2']
+        r, _ = self.crear(datos={'etapas': etapas})
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()['datos']['etapas'], etapas)
+        pdf = self.client.get(f"{URL}{r.json()['id_ipc']}/pdf/")
+        self.assertTrue(pdf.content.startswith(b'%PDF'))
+
     def test_una_sst_escrita_a_mano(self):
         r, _ = self.crear(ssts=[{'sst': self.sst1.pk},
                                 {'codigo': ' sst-9000 ', 'direccion': 'Jr. Luna 5'}])

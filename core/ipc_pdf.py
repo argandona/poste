@@ -116,7 +116,7 @@ def _epp_peligros_etapas(d):
     derecha = Table(
         [[_p('<b>(7) Etapas de la Tarea</b>', _cen)]] +
         [[_p(f'<b>{i}</b>  {etapas[i - 1] if i <= len(etapas) else ""}')]
-         for i in range(1, F.MAX_ETAPAS + 1)],
+         for i in range(1, max(F.RENGLONES_ETAPAS, len(etapas)) + 1)],
         colWidths=[ANCHO * .42 - 12])
     derecha.setStyle(TableStyle([('LINEBELOW', (0, 0), (-1, -1), 0.3, colors.grey)]))
     return _grilla(Table([[izquierda, derecha]], colWidths=[ANCHO * .58, ANCHO * .42]))

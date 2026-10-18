@@ -12,7 +12,7 @@ Lo marcado se guarda en `IPC.datos` con estas claves:
     epp_otros:         str
     peligros_criticos: [clave, ...]           (6)
     peligros_otros:    str
-    etapas:            [str, ...]             (7) hasta 10
+    etapas:            [str, ...]             (7) hasta 20, en su orden
     brigadas:          [clave, ...]           (9)
     equipamiento:      [clave, ...]           (10)
     equipamiento_otros: str
@@ -210,7 +210,27 @@ OBSERVACION_POR_DEFECTO = ('La actividad se concluyó con normalidad y el '
 # Renglones del cuadro (16) Ubicación: lo que pasa de aquí va en la misma fila
 # separado por guion.
 RENGLONES_UBICACION = 8
-MAX_ETAPAS = 10
+# (7) El papel trae 10 renglones; si eligen más etapas, el PDF agrega filas.
+RENGLONES_ETAPAS = 10
+MAX_ETAPAS = 20
+
+# Etapas que se ofrecen para marcar según la tarea: si la tarea contiene alguna
+# de las `claves` (sin tildes ni mayúsculas), salen estas etapas en su orden y
+# el responsable marca las que hará; puede agregar otras y reordenarlas.
+PLANTILLAS_ETAPAS = [
+    {'claves': ['reforzamiento de poste', 'rehabilitacion de poste'],
+     'etapas': [
+         'Traslado de personal al punto de trabajo',
+         'Prueba de electrizamiento (antes, durante y después)',
+         'Carga y descarga de materiales, agregados y otros',
+         'Señalización de zona de trabajo',
+         'Corte y rotura de vereda',
+         'Montaje y desmontaje de trípode',
+         'Excavación y cierre de hoyo',
+         'Rehabilitación de poste',
+         'Reparación de vereda, orden y limpieza',
+     ]},
+]
 
 
 def formato():
@@ -222,6 +242,7 @@ def formato():
         'factores': FACTORES, 'energias': ENERGIAS,
         'observacion_por_defecto': OBSERVACION_POR_DEFECTO,
         'max_etapas': MAX_ETAPAS,
+        'plantillas_etapas': PLANTILLAS_ETAPAS,
     }
 
 
