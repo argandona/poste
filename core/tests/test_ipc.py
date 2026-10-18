@@ -217,6 +217,37 @@ class IPCTests(BaseAPITestCase):
         self.assertTrue(r.content.startswith(b'%PDF'))
         self.assertEqual(IPCSST.objects.filter(ipc_id=ipc_id).count(), 9)
 
+    def _poste(self, sst, numero, estado):
+        from ..models import SSTEncargado, SSTSuministro, Suministro
+        SSTEncargado.objects.get_or_create(sst=sst, usuario=self.capataz)
+        p = Suministro.objects.create(numero_suministro=numero, estado=estado)
+        SSTSuministro.objects.create(sst=sst, suministro=p, asignado_a=self.capataz)
+
+    def test_solo_se_ofrecen_las_sst_por_liquidar(self):
+        sst3 = SST.objects.create(sst='3', codigo='SST-3', empresa=self.empresa)
+        self._poste(self.sst1, 'P-1', 'ejecutado')   # ya liquidada
+        self._poste(self.sst2, 'P-2', 'ejecutado')   # le falta un poste
+        self._poste(self.sst2, 'P-3', 'asignado')
+        from ..models import SSTEncargado
+        SSTEncargado.objects.create(sst=sst3, usuario=self.capataz)  # sin postes aún
+        self.auth(self.capataz)
+        codigos = lambda **q: sorted(s['codigo'] for s in self.client.get(
+            '/api/ssts/mis_sst/', {'usuario': self.capataz.pk, **q}).json())
+        self.assertEqual(codigos(pendientes=1), ['SST-2', 'SST-3'])
+        # Sin el filtro, como antes: todas.
+        self.assertEqual(codigos(), ['SST-1', 'SST-2', 'SST-3'])
+
+    def test_una_sst_liquidada_no_entra_a_un_ipc(self):
+        self._poste(self.sst1, 'P-1', 'ejecutado')
+        r, _ = self.crear()
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('ya está liquidada', r.json()['detail'])
+        r, _ = self.crear(ssts=[{'sst': self.sst2.pk}])
+        self.assertEqual(r.status_code, 201, r.content)
+        r = self.client.post(f"{URL}{r.json()['id_ipc']}/agregar_sst/",
+                             {'sst': self.sst1.pk}, format='json')
+        self.assertEqual(r.status_code, 400)
+
     def test_el_centro_medico_lo_escribe_el_responsable(self):
         r, _ = self.crear(centro_medico='  Hospital de Surco ')
         e = r.json()['datos']['emergencia']
