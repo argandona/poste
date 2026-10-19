@@ -1317,6 +1317,8 @@ class JornadaCamion(models.Model):
     trabajo_interno = models.TextField(blank=True)
     # Distrito del trabajo escrito a mano. El de las SST sale de cada SST.
     distrito_interno = models.CharField(max_length=100, blank=True)
+    # Cuántos viajan en el camión, chofer incluido (F09-PA-SMAC-007).
+    personas     = models.PositiveSmallIntegerField(default=4)
     km_cierre    = models.PositiveIntegerField(null=True, blank=True)
     foto_cierre  = models.CharField(max_length=255, blank=True)
     hora_cierre  = models.DateTimeField(null=True, blank=True)
@@ -1342,6 +1344,8 @@ class JornadaSST(models.Model):
     class Meta:
         db_table = "jornada_sst"
         unique_together = ("jornada", "sst")
+        # En el orden en que las eligió: la primera va al F09-PA-SMAC-007.
+        ordering = ["id_jornada_sst"]
 
 
 class CargaCombustible(models.Model):
