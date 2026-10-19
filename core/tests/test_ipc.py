@@ -81,7 +81,10 @@ class IPCTests(BaseAPITestCase):
         self.assertEqual(r.status_code, 201, r.content)
         d = r.json()
         self.assertEqual((d['fecha'], d['estado'], d['tarea']),
-                         (str(timezone.localdate()), 'abierto', 'Reforzamiento de poste'))
+                         (str(timezone.localdate()), 'cerrado', 'Reforzamiento de poste'))
+        # Cerrado al guardarlo: (17) con la observación por defecto y la hora.
+        self.assertIn('concluyó con normalidad', d['observaciones'])
+        self.assertIsNotNone(d['hora_cierre'])
         self.assertEqual([s['sst'] for s in d['ssts']], ['SST-1'])
         # Lo que el formato no conoce no se guarda.
         self.assertEqual(d['datos']['epp'], ['casco', 'guantes'])
@@ -179,15 +182,36 @@ class IPCTests(BaseAPITestCase):
 
     # ── Cerrar, ver y PDF ────────────────────────────────────────────────────
 
-    def test_cerrar_con_la_observacion_por_defecto(self):
+    def test_cerrado_al_guardar_igual_suma_sst_y_confirman(self):
+        ipc_id = self.crear(observaciones='Sin novedad.')[0].json()['id_ipc']
+        r = self.client.post(f'{URL}{ipc_id}/agregar_sst/',
+                             {'sst': self.sst2.pk}, format='json')
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual((r.json()['estado'], r.json()['observaciones']),
+                         ('cerrado', 'Sin novedad.'))
+        self.assertTrue(r.json()['puedo_editar'])
+        self.assertEqual([i['id_ipc'] for i in self.client.get(f'{URL}hoy/').json()],
+                         [ipc_id])
+        r = self.client.patch(f'{URL}{ipc_id}/', {'observaciones': 'Pedro se retiró.'},
+                              format='json')
+        self.assertEqual(r.json()['observaciones'], 'Pedro se retiró.')
+        self.assertEqual(self.client.post(f'{URL}{ipc_id}/cerrar/', {}, format='json')
+                         .status_code, 400)
+        self.auth(self.pedro)
+        self.assertEqual([i['id_ipc'] for i in
+                          self.client.get(URL, {'por_confirmar': 1}).json()], [ipc_id])
+        r = self.client.post(f'{URL}{ipc_id}/confirmar/')
+        self.assertEqual(r.status_code, 200, r.content)
+
+    def test_el_abierto_de_antes_se_cierra_con_la_observacion_por_defecto(self):
         ipc_id = self.crear()[0].json()['id_ipc']
+        IPC.objects.filter(pk=ipc_id).update(estado='abierto', observaciones='',
+                                             hora_cierre=None)
         r = self.client.post(f'{URL}{ipc_id}/cerrar/', {}, format='json')
         self.assertEqual(r.status_code, 200, r.content)
         self.assertEqual(r.json()['estado'], 'cerrado')
         self.assertIn('concluyó con normalidad', r.json()['observaciones'])
         self.assertIsNotNone(r.json()['hora_cierre'])
-        self.assertEqual(self.client.post(f'{URL}{ipc_id}/agregar_sst/',
-                                          {'sst': self.sst2.pk}, format='json').status_code, 400)
 
     def test_quien_lo_ve(self):
         ipc_id = self.crear()[0].json()['id_ipc']
@@ -211,7 +235,6 @@ class IPCTests(BaseAPITestCase):
         for i in range(3, 11):
             sst = SST.objects.create(sst=str(i), codigo=f'SST-{i}', empresa=self.empresa)
             self.client.post(f'{URL}{ipc_id}/agregar_sst/', {'sst': sst.pk}, format='json')
-        self.client.post(f'{URL}{ipc_id}/cerrar/', {}, format='json')
         r = self.client.get(f'{URL}{ipc_id}/pdf/')
         self.assertEqual(r.status_code, 200)
         self.assertTrue(r.content.startswith(b'%PDF'))

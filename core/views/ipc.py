@@ -9,7 +9,9 @@ class IPCViewSet(viewsets.ViewSet):
     La hace un capataz o encargado antes de empezar; durante el día le suma
     las SST que va ejecutando (nunca un IPC de otro día). Cada participante
     confirma desde su app; si no puede, firma en el equipo del responsable.
-    Al terminar se cierra con las observaciones y sale el PDF del formato."""
+    Se cierra al guardarlo, con las observaciones (17) y la hora de cierre:
+    cerrado se empieza a trabajar. Ese mismo día se le siguen sumando SST y
+    participantes (decisión del usuario, 2026-10-19); otro día ya no."""
     permission_classes = [permissions.IsAuthenticated]
 
     # Firma dibujada (PNG) más pesada que esto es un error.
@@ -54,8 +56,7 @@ class IPCViewSet(viewsets.ViewSet):
             'factores_en_riesgo': [f['texto'] for f in factores_en_riesgo(ipc.datos)],
             'observaciones': ipc.observaciones,
             'hora_cierre': ipc.hora_cierre,
-            'puedo_editar': (ipc.responsable_id == actor.pk and ipc.fecha == hoy
-                             and ipc.estado == 'abierto'),
+            'puedo_editar': ipc.responsable_id == actor.pk and ipc.fecha == hoy,
             'mi_estado': mio.estado if mio else None,
             'ssts': [{'id_sst': s.sst_id, 'sst': s.codigo,
                       'manual': s.sst_id is None,
@@ -74,7 +75,7 @@ class IPCViewSet(viewsets.ViewSet):
         return Response(self._datos(ipc, actor), status=status)
 
     def _mio_editable(self, request, pk):
-        """El IPC del actor, abierto y de hoy: lo único que se modifica."""
+        """El IPC del actor y de hoy: lo único que se modifica (cerrado o no)."""
         actor = self._actor(request)
         ipc = IPC.objects.filter(pk=pk, responsable=actor).first()
         if ipc is None:
@@ -82,8 +83,6 @@ class IPCViewSet(viewsets.ViewSet):
         if ipc.fecha != timezone.localdate():
             raise ErrorNegocio('Un IPC solo sirve el día en que se hizo: '
                                'para hoy genera uno nuevo.')
-        if ipc.estado != 'abierto':
-            raise ErrorNegocio('El IPC ya está cerrado.')
         return actor, ipc
 
     # ── Participantes ───────────────────────────────────────────────────────
@@ -226,8 +225,7 @@ class IPCViewSet(viewsets.ViewSet):
         qs = self._visibles(actor)
         if request.query_params.get('por_confirmar'):
             qs = IPC.objects.filter(participantes__usuario=actor,
-                                    participantes__estado='pendiente',
-                                    estado='abierto')
+                                    participantes__estado='pendiente')
         if request.query_params.get('fecha'):
             qs = qs.filter(fecha=request.query_params['fecha'])
         qs = self._con_todo(qs)[:200]
@@ -242,20 +240,21 @@ class IPCViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'])
     def hoy(self, request):
-        """GET /api/ipcs/hoy/ — los IPC abiertos que el actor hizo hoy: los
-        que puede reutilizar sumando la siguiente SST."""
+        """GET /api/ipcs/hoy/ — los IPC que el actor hizo hoy: los que puede
+        reutilizar sumando la siguiente SST."""
         actor = self._actor(request)
         qs = self._con_todo(IPC.objects.filter(
-            responsable=actor, fecha=timezone.localdate(), estado='abierto'))
+            responsable=actor, fecha=timezone.localdate()))
         return Response([self._datos(i, actor) for i in qs])
 
     def create(self, request):
         """POST /api/ipcs/
-        {tarea, coordinador?, centro_medico?, datos,
+        {tarea, coordinador?, centro_medico?, observaciones?, datos,
          ssts: [{sst | codigo, direccion?}],
          participantes: [usuario, ...]}
 
-        El responsable entra solo como participante, ya conforme. Los contactos
+        Queda cerrado al guardarlo: (17) observaciones (sin ellas, las de por
+        defecto) y la hora de cierre, que es la de ahora. El responsable entra solo como participante, ya conforme. Los contactos
         de emergencia se copian de los del SuperAdmin, salvo el centro médico
         más cercano, que depende de dónde se trabaja: lo escribe el responsable
         (la app lo pide; sin él, queda el del SuperAdmin)."""
@@ -293,7 +292,9 @@ class IPCViewSet(viewsets.ViewSet):
                 empresa_id=actor.empresa_id, responsable=actor,
                 coordinador=coordinador, fecha=timezone.localdate(),
                 tarea=tarea[:2000], formato_codigo=CODIGO,
-                formato_version=VERSION, datos=datos)
+                formato_version=VERSION, datos=datos, estado='cerrado',
+                observaciones=self._observaciones(request),
+                hora_cierre=timezone.localtime().time().replace(microsecond=0))
             for sst, codigo, direccion in lista_ssts:
                 self._sumar_sst(ipc, sst, codigo, direccion)
             self._sumar_participante(ipc, actor, conforme=True)
@@ -306,8 +307,8 @@ class IPCViewSet(viewsets.ViewSet):
         return self._responder(ipc, actor, status=201)
 
     def partial_update(self, request, pk=None):
-        """PATCH /api/ipcs/{id}/ {tarea?, coordinador?, centro_medico?, datos?}
-        — hoy y abierto."""
+        """PATCH /api/ipcs/{id}/ {tarea?, coordinador?, centro_medico?,
+        observaciones?, datos?} — solo el de hoy."""
         from ..ipc_formato import limpiar_datos
         actor, ipc = self._mio_editable(request, pk)
         if 'tarea' in request.data:
@@ -324,6 +325,8 @@ class IPCViewSet(viewsets.ViewSet):
         emergencia = (ipc.datos or {}).get('emergencia') or {}
         if 'centro_medico' in request.data:
             emergencia = {**emergencia, 'centro_medico': self._centro_medico(request)}
+        if 'observaciones' in request.data:
+            ipc.observaciones = self._observaciones(request)
         if 'datos' in request.data:
             ipc.datos = limpiar_datos(request.data.get('datos'))
         ipc.datos = {**(ipc.datos or {}), 'emergencia': emergencia}
@@ -375,8 +378,6 @@ class IPCViewSet(viewsets.ViewSet):
              .filter(ipc_id=pk, usuario=actor).first())
         if p is None:
             raise PermissionDenied('No estás en este IPC.')
-        if p.ipc.estado != 'abierto':
-            raise ErrorNegocio('El IPC ya está cerrado.')
         if p.estado != 'conforme':
             p.estado = 'conforme'
             p.metodo = IPCParticipante.METODO_APP
@@ -419,21 +420,26 @@ class IPCViewSet(viewsets.ViewSet):
         p.save(update_fields=['firma', 'estado', 'metodo', 'confirmado'])
         return self._responder(ipc, actor)
 
+    @staticmethod
+    def _observaciones(request):
+        from ..ipc_formato import OBSERVACION_POR_DEFECTO
+        return ((request.data.get('observaciones') or '').strip()
+                or OBSERVACION_POR_DEFECTO)[:3000]
+
     @action(detail=True, methods=['post'])
     def cerrar(self, request, pk=None):
         """POST /api/ipcs/{id}/cerrar/ {observaciones?}
 
-        (17) Observaciones y hora de cierre del frente de trabajo. Se puede
-        cerrar el día siguiente si quedó abierto, pero ya no se le suma nada."""
-        from ..ipc_formato import OBSERVACION_POR_DEFECTO
+        (17) Observaciones y hora de cierre del frente de trabajo. Solo para
+        los IPC que quedaron abiertos antes de que se cerraran al guardarlos;
+        se puede cerrar al día siguiente."""
         actor = self._actor(request)
         ipc = IPC.objects.filter(pk=pk, responsable=actor).first()
         if ipc is None:
             raise PermissionDenied('Solo el responsable cierra su IPC.')
         if ipc.estado != 'abierto':
             raise ErrorNegocio('El IPC ya está cerrado.')
-        ipc.observaciones = ((request.data.get('observaciones') or '').strip()
-                             or OBSERVACION_POR_DEFECTO)[:3000]
+        ipc.observaciones = self._observaciones(request)
         ipc.hora_cierre = timezone.localtime().time().replace(microsecond=0)
         ipc.estado = 'cerrado'
         ipc.save(update_fields=['observaciones', 'hora_cierre', 'estado'])
