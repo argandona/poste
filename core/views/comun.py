@@ -40,7 +40,7 @@ from ..models import (
     CorreccionLiquidacion,
     PlanoSST, AsignacionAgregado,
     EPP, StockEPP, IngresoEPP, PedidoEPP, DetallePedidoEPP,
-    ContactoEmergencia, IPC, IPCSST, IPCParticipante,
+    ContactoEmergencia, IPC, IPCSST, IPCParticipante, Conduccion,
 )
 from ..serializers import (
     EmpresaSerializer, RolSerializer,
