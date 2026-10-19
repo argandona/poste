@@ -318,6 +318,28 @@ class IPCTests(BaseAPITestCase):
         r, _ = self.crear()
         self.assertEqual(r.json()['datos']['emergencia']['centro_medico'], 'Clínica Sur')
 
+    def test_el_superadmin_pone_los_telefonos_de_una_empresa(self):
+        admin = Usuario.objects.create(
+            nombre='Admin', email='admin@x.com', clave='x',
+            rol=Rol.objects.get_or_create(id_rol=Rol.SUPERADMIN,
+                                          defaults={'descripcion': 'SuperAdmin'})[0])
+        self.auth(admin)
+        url = f'{URL}contacto_emergencia/'
+        # Sin empresa no sabe de cuál son.
+        self.assertEqual(self.client.put(url, {'medico_telefono': '1'},
+                                         format='json').status_code, 400)
+        r = self.client.put(url, {'empresa': self.empresa.pk,
+                                  'superior_telefono': '111', 'medico_telefono': '222',
+                                  'centro_medico_telefono': '333'}, format='json')
+        self.assertEqual(r.status_code, 200, r.content)
+        r = self.client.get(url, {'empresa': self.empresa.pk}).json()
+        self.assertEqual((r['superior_telefono'], r['medico_telefono'],
+                          r['centro_medico_telefono'], r['superior_nombre']),
+                         ('111', '222', '333', 'Jefe Uno'))
+        # El capataz los ve en su IPC nuevo.
+        r, _ = self.crear(centro_medico='Hospital')
+        self.assertEqual(r.json()['datos']['emergencia']['centro_medico_telefono'], '333')
+
     def test_formato_y_contactos(self):
         self.auth(self.pedro)
         f = self.client.get(f'{URL}formato/').json()
