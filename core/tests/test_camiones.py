@@ -227,12 +227,45 @@ class CamionesTests(BaseAPITestCase):
         r = self.client.get(f'{J}informe/', {'anio': hoy.year, 'mes': hoy.month,
                                              'formato': 'xlsx'})
         libro = openpyxl.load_workbook(io.BytesIO(r.content))
-        self.assertEqual(libro.sheetnames, ['Resumen', 'Salidas', 'Combustible', 'Eliminados'])
+        self.assertEqual(libro.sheetnames, ['Resumen', 'Salidas', 'Combustible', 'Eliminados',
+                                            'F09-PA-SMAC-007'])
         self.assertEqual(libro['Resumen']['A4'].value, 'ABC-123')
         salidas = libro['Salidas']
         col = [c.value for c in salidas[3]].index('Distrito') + 1
         self.assertEqual(sorted(salidas.cell(row=f, column=col).value for f in (4, 5)),
                          ['Ate', 'Surco'])
+
+    def test_personas_por_defecto_y_cambiadas(self):
+        jid = self.salir().json()['id_jornada']
+        self.assertEqual(JornadaCamion.objects.get(pk=jid).personas, 4)
+        r = self.client.post(f'{J}{jid}/motivo/', {'ssts': [self.sst.pk], 'personas': 6},
+                             format='json')
+        self.assertEqual(r.json()['personas'], 6)
+        self.cerrar(jid, 1100)
+        self.assertIn('1 a 30', self.salir(1100, personas=0).json()['detail'])
+        self.assertEqual(self.salir(1100, personas='2').json()['personas'], 2)
+
+    def test_hoja_f09_pa_smac_007(self):
+        otra = SST.objects.create(empresa=self.empresa, codigo='3907242', distrito='Chosica')
+        SSTEncargado.objects.create(sst=otra, usuario=self.capataz)
+        jid = self.salir(1000, ssts=[otra.pk, self.sst.pk], personas=6).json()['id_jornada']
+        self.cerrar(jid, 1085)
+        self.salir(1085, ssts=[], trabajo_interno='Almacén', distrito_interno='Ate')
+
+        hoy = timezone.localdate()
+        self.auth(self.coordinador)
+        r = self.client.get(f'{J}informe/', {'anio': hoy.year, 'mes': hoy.month,
+                                             'formato': 'xlsx'})
+        ws = openpyxl.load_workbook(io.BytesIO(r.content))['F09-PA-SMAC-007']
+        self.assertEqual((ws['E4'].value, ws['K4'].value), (self.empresa.nombre, 'Coordinadora'))
+        fila = [c.value for c in ws[7]][1:14]
+        self.assertEqual(fila[0:2], [1, fila[1]])
+        self.assertEqual(fila[3:], [3907242, 'ABC-123', 'Camión', 'DIESEL',
+                                    'base de principal (Villa el salvador)', 'Chosica',
+                                    1000, 1085, '=L7-K7', 6])
+        fila = [c.value for c in ws[8]][1:14]
+        self.assertEqual((fila[3], fila[8], fila[10], fila[11], fila[12]),
+                         ('TRABAJO INTERNO', 'Ate', 'SIN CIERRE', None, 4))
 
     def test_salida_sin_cierre_de_un_dia_anterior(self):
         jid = self.salir(1000).json()['id_jornada']

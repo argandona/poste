@@ -40,6 +40,8 @@ UMBRAL_ALERTA = Decimal('0.85')
 TRAMOS_PROMEDIO = 5
 # Cuántos meses anteriores hacen el promedio del informe.
 MESES_PROMEDIO = 3
+# Los que viajan en el camión si el chofer no dice otra cosa.
+PERSONAS_POR_DEFECTO = 4
 
 
 # ── Ayudas ───────────────────────────────────────────────────────────────────
@@ -66,6 +68,19 @@ def _decimal(valor, que, decimales):
     if d is None or not d.is_finite() or d <= 0:
         raise ErrorNegocio(f'Escribe {que}.')
     return d.quantize(Decimal(1).scaleb(-decimales))
+
+
+def _personas(valor):
+    """Cuántos viajan. Sin dato (APK viejo) son 4, lo de siempre."""
+    if valor in (None, ''):
+        return PERSONAS_POR_DEFECTO
+    try:
+        n = int(valor)
+    except (TypeError, ValueError):
+        raise ErrorNegocio('Las personas que viajan deben ser un número.')
+    if not 1 <= n <= 30:
+        raise ErrorNegocio('Las personas que viajan van de 1 a 30.')
+    return n
 
 
 def _foto_obligatoria(valor):
@@ -126,6 +141,7 @@ def datos_jornada(j):
         'trabajo_interno': j.trabajo_interno,
         'distrito_interno': j.distrito_interno,
         'distritos': distritos_de(j),
+        'personas': j.personas,
         'observacion': j.observacion,
         'ssts': [{'id_sst': x.sst_id, 'sst': _sst_texto(x.sst), 'distrito': x.sst.distrito,
                   'actividad': x.sst.actividad.nombre if x.sst.actividad_id else ''}
@@ -419,7 +435,7 @@ MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio',
          'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
 
 
-def informe_excel(informe):
+def informe_excel(informe, contratista='', responsable=''):
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -501,9 +517,98 @@ def informe_excel(informe):
           for e in informe.get('eliminados', [])],
          [12, 7, 22, 11, 20, 16, 22, 20, 14, 40])
 
+    hoja_smac(wb.create_sheet('F09-PA-SMAC-007'), informe, contratista, responsable)
+
     salida = io.BytesIO()
     wb.save(salida)
     return salida.getvalue()
+
+
+# Lo que el formato pide y en ENCOSSA no cambia.
+SMAC_TRANSPORTE = 'Camión'
+SMAC_PARTIDA = 'base de principal (Villa el salvador)'
+
+
+def hoja_smac(ws, informe, contratista, responsable):
+    """F09-PA-SMAC-007, Reporte de kilometraje de unidades vehiculares de las
+    contratistas: una fila por salida, con la primera SST que eligió el chofer
+    (o TRABAJO INTERNO) y su distrito como destino."""
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    fino = Side(style='thin')
+    borde = Border(left=fino, right=fino, top=fino, bottom=fino)
+    centro = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    arial = lambda **k: Font(name='Arial', **k)
+    ws.sheet_view.showGridLines = False
+
+    for rango in ('B1:D2', 'E1:L1', 'E2:L2', 'M1:N2'):
+        ws.merge_cells(rango)
+        for fila in ws[rango]:
+            for celda in fila:
+                celda.border = borde
+    ws['B1'] = contratista
+    ws['B1'].font = arial(bold=True, size=14)
+    ws['E1'] = 'FORMATO'
+    ws['E1'].font = arial(size=14)
+    ws['E2'] = 'REPORTE DE KILOMETRAJE DE UNIDADES VEHICULARES DE LAS CONTRATISTAS'
+    ws['E2'].font = arial(bold=True, size=14)
+    ws['M1'] = ('Código      : F09-PA-SMAC-007\nVersión     : 01\nAprobado : SGSMAC\n'
+                'Fecha       : 04/01/2024\nPágina      : 1 de 1')
+    ws['M1'].font = arial(size=9)
+    ws['M1'].alignment = Alignment(vertical='center', wrap_text=True)
+    for c in ('B1', 'E1', 'E2'):
+        ws[c].alignment = centro
+    ws.row_dimensions[1].height = 25
+    ws.row_dimensions[2].height = 51
+
+    ws['B4'], ws['E4'] = 'NOMBRE DEL CONTRATISTA:', contratista
+    ws['J4'], ws['K4'] = 'RESPONSABLE DEL REPORTE', responsable
+    for c in ('B4', 'J4'):
+        ws[c].font = arial(bold=True)
+    for c in ('E4', 'K4'):
+        ws[c].font = arial()
+
+    encabezados = ['ITEM', 'FECHA', 'TRAMO', 'SST', 'PLACA DE VEHICULO',
+                   'TIPO DE TRANSPORTE', 'TIPO DE COMBUSTIBLE',
+                   ' DIRECCIÓN DE PARTIDA (PUNTO INICIAL)', 'DIRECCIÓN DE DESTINO FINAL',
+                   'HOROMETRO (KILOMETRAJE INCIAL)', 'HOROMETRO (KILOMETRAJE FINAL)',
+                   'DISTANCIA RECORRIDA EN EL TRAMO\n[KM]',
+                   'PERSONAS VIAJARON POR TRAMO\n[PERSONAS/TRAMO]']
+    azul = PatternFill('solid', fgColor='DDEBF7')
+    for col, texto in enumerate(encabezados, 2):
+        celda = ws.cell(row=6, column=col, value=texto)
+        celda.font = arial(bold=True, size=10)
+        celda.fill = azul
+        celda.alignment = centro
+        celda.border = borde
+    ws.row_dimensions[6].height = 76
+
+    jornadas = sorted((j for c in informe['camiones'] for j in c['jornadas']),
+                      key=lambda j: (j['fecha'], j['hora_salida']))
+    for i, j in enumerate(jornadas, 1):
+        f = 6 + i
+        primera = j['ssts'][0] if j['ssts'] else None
+        if primera:
+            sst = int(primera['sst']) if primera['sst'].isdigit() else primera['sst']
+            destino = primera['distrito'] or j['distrito_interno']
+        else:
+            sst, destino = 'TRABAJO INTERNO', j['distrito_interno']
+        cerrada = j['km_cierre'] is not None
+        valores = [i, j['fecha'], None, sst, j['camion_placa'], SMAC_TRANSPORTE,
+                   j['combustible'].upper(), SMAC_PARTIDA, destino, j['km_salida'],
+                   j['km_cierre'] if cerrada else 'SIN CIERRE',
+                   f'=L{f}-K{f}' if cerrada else None, j['personas']]
+        for col, valor in enumerate(valores, 2):
+            celda = ws.cell(row=f, column=col, value=valor)
+            celda.border = borde
+            celda.alignment = Alignment(horizontal='center', vertical='center')
+        ws.cell(row=f, column=3).number_format = 'DD/MM/YYYY'
+        ws.cell(row=f, column=13).number_format = '#,##0'
+
+    for col, ancho in zip('ABCDEFGHIJKLMN',
+                          [2, 6, 12, 10, 16, 13, 14, 14, 37, 21, 18, 18, 20, 20]):
+        ws.column_dimensions[col].width = ancho
+    ws.freeze_panes = 'B7'
 
 
 # ── API ──────────────────────────────────────────────────────────────────────
@@ -598,10 +703,12 @@ class JornadaCamionViewSet(viewsets.ViewSet):
 
     @staticmethod
     def _motivo(empresa_id, datos):
-        ids = {int(x) for x in datos.get('ssts') or []}
-        ssts = list(SST.objects.filter(pk__in=ids, empresa_id=empresa_id))
-        if len(ssts) != len(ids):
+        # En el orden en que las eligió, sin repetir.
+        ids = list(dict.fromkeys(int(x) for x in datos.get('ssts') or []))
+        por_id = SST.objects.filter(pk__in=ids, empresa_id=empresa_id).in_bulk()
+        if len(por_id) != len(ids):
             raise ErrorNegocio('Una de las SST no existe.')
+        ssts = [por_id[i] for i in ids]
         interno = (datos.get('trabajo_interno') or '').strip()
         if not ssts and not interno:
             raise ErrorNegocio('Elige las SST o describe el trabajo interno.')
@@ -613,7 +720,7 @@ class JornadaCamionViewSet(viewsets.ViewSet):
     def create(self, request):
         """POST /api/jornadas-camion/ — la salida.
         {camion, km, foto (jpeg base64), ssts: [id], trabajo_interno,
-         distrito_interno (obligatorio con trabajo_interno)}"""
+         distrito_interno (obligatorio con trabajo_interno), personas (4 si falta)}"""
         actor = self._del_chofer(request)
         d = request.data
         camion = _camiones_de(actor).filter(pk=d.get('camion'), activo=True).first()
@@ -621,6 +728,7 @@ class JornadaCamionViewSet(viewsets.ViewSet):
             raise ErrorNegocio('Elige el camión.')
         km = _km(d.get('km'))
         ssts, interno, distrito = self._motivo(camion.empresa_id, d)
+        personas = _personas(d.get('personas'))
         foto = _foto_obligatoria(d.get('foto'))
 
         propia = JornadaCamion.objects.filter(chofer=actor, km_cierre__isnull=True).first()
@@ -642,7 +750,7 @@ class JornadaCamionViewSet(viewsets.ViewSet):
             j = JornadaCamion.objects.create(
                 camion=camion, chofer=actor, responsable=responsable_de(camion, hoy),
                 fecha=hoy, km_salida=km, foto_salida=archivo, trabajo_interno=interno,
-                distrito_interno=distrito)
+                distrito_interno=distrito, personas=personas)
             JornadaSST.objects.bulk_create([JornadaSST(jornada=j, sst=s) for s in ssts])
         return Response(datos_jornada(_jornadas_con_todo(JornadaCamion.objects).get(pk=j.pk)),
                         status=201)
@@ -658,14 +766,16 @@ class JornadaCamionViewSet(viewsets.ViewSet):
 
     @action(detail=True, methods=['post'])
     def motivo(self, request, pk=None):
-        """POST /api/jornadas-camion/{id}/motivo/ {ssts, trabajo_interno, distrito_interno} —
-        mientras está en ruta, cambiar a qué va."""
+        """POST /api/jornadas-camion/{id}/motivo/ {ssts, trabajo_interno, distrito_interno,
+        personas} — mientras está en ruta, cambiar a qué va y cuántos van."""
         actor, j = self._abierta_propia(request, pk)
         ssts, interno, distrito = self._motivo(j.camion.empresa_id, request.data)
+        if 'personas' in request.data:
+            j.personas = _personas(request.data.get('personas'))
         with transaction.atomic():
             j.trabajo_interno = interno
             j.distrito_interno = distrito
-            j.save(update_fields=['trabajo_interno', 'distrito_interno'])
+            j.save(update_fields=['trabajo_interno', 'distrito_interno', 'personas'])
             j.ssts.all().delete()
             JornadaSST.objects.bulk_create([JornadaSST(jornada=j, sst=s) for s in ssts])
         return Response(datos_jornada(_jornadas_con_todo(JornadaCamion.objects).get(pk=j.pk)))
@@ -730,8 +840,15 @@ class JornadaCamionViewSet(viewsets.ViewSet):
             anio, mes, empresa_id=None if actor.es_superadmin() else actor.empresa_id,
             camion_id=request.query_params.get('camion') or None)
         if request.query_params.get('formato') == 'xlsx':
+            if actor.empresa_id:
+                contratista = actor.empresa.nombre
+            else:
+                contratista = ', '.join(Camion.objects
+                                        .filter(pk__in=[c['camion'] for c in informe['camiones']])
+                                        .values_list('empresa__nombre', flat=True)
+                                        .distinct().order_by('empresa__nombre'))
             r = HttpResponse(
-                informe_excel(informe),
+                informe_excel(informe, contratista, actor.nombre),
                 content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             r['Content-Disposition'] = f'attachment; filename="camiones_{anio}_{mes:02d}.xlsx"'
             return r
