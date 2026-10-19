@@ -104,6 +104,16 @@ class Usuario(models.Model):
     # es quien conduce, y el SuperAdmin.
     def puede_manejar(self): return self._tiene(Rol.CHOFER, Rol.SUPERADMIN)
     # El informe mensual de kilometraje y combustible, y su alerta.
+    # Consultar los datos de otro usuario (sus SST, su camión, su semana):
+    # quienes asignan y supervisan. Los demás, solo los suyos.
+    def puede_ver_datos_de_otros(self): return self._tiene(Rol.SUPERADMIN, Rol.COORDINADOR,
+                                                           Rol.ENCARGADO_ALMACEN)
+    # El consolidado de liquidaciones: quienes liquidan ven el suyo; el
+    # liquidador, el coordinador y el SuperAdmin, el de todos.
+    def puede_ver_consolidado(self): return self._tiene(Rol.CAPATAZ, Rol.ENCARGADO, Rol.LIQUIDADOR,
+                                                        Rol.COORDINADOR, Rol.SUPERADMIN)
+    def puede_ver_consolidado_de_todos(self): return self._tiene(Rol.LIQUIDADOR, Rol.COORDINADOR,
+                                                                 Rol.SUPERADMIN)
     def puede_ver_informe_camiones(self): return self._tiene(Rol.SUPERADMIN, Rol.COORDINADOR)
 
     def clean(self):

@@ -134,6 +134,31 @@ def ssts_ya_liquidadas(usuario, sst_ids=None):
     return con_postes - pendientes
 
 
+def usuario_consultado(request, puede_ver_otros):
+    """El usuario de `?usuario=<id>`, si quien pregunta puede verlo.
+
+    Cada uno ve lo suyo; ver lo de otro solo si `puede_ver_otros(actor)` y
+    es de su empresa (el SuperAdmin, de cualquiera). Así nadie consulta los
+    datos de otro cambiando el número en la dirección."""
+    actor = (Usuario.objects.select_related('rol')
+             .filter(pk=request.user.id_usuario).first())
+    if actor is None:
+        raise PermissionDenied('Sesión no válida.')
+    usuario_id = str(request.query_params.get('usuario') or '').strip()
+    if not usuario_id or usuario_id == str(actor.pk):
+        return actor
+    if not puede_ver_otros(actor):
+        raise PermissionDenied('Solo puedes ver tus propios datos.')
+    usuario = (Usuario.objects.select_related('rol')
+               .filter(pk=usuario_id).first() if usuario_id.isdigit() else None)
+    if usuario is None:
+        raise ErrorNegocio('Usuario no encontrado.')
+    if (not actor.es_superadmin() and actor.empresa_id
+            and usuario.empresa_id != actor.empresa_id):
+        raise PermissionDenied('Ese usuario es de otra empresa.')
+    return usuario
+
+
 def _render_suministros(nombre_usuario, fecha_desde=None, fecha_hasta=None):
     usuario = Usuario.objects.filter(nombre=nombre_usuario).first()
     if usuario is None:
