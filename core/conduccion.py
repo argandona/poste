@@ -1,7 +1,9 @@
 """Formato de Conducción (F03-IA-QHSE-001) en la app.
 
-El chofer lo llena cada día antes de manejar, **después de su IPC** de hoy:
-responde los 8 controles y empieza con una SST; durante el día le suma las
+El chofer lo llena cada día antes de manejar. Va aparte de su IPC: puede
+hacer uno, el otro o los dos, en cualquier orden (decisión del usuario,
+2026-10-19); si ya hay IPC de hoy, la Conducción queda ligada a él. Responde
+los 8 controles y empieza con una SST; durante el día le suma las
 demás y cada una queda como una fila firmada (su confirmación desde la app).
 Si un control sale No, se avisa al responsable del camión y al coordinador,
 y se deja seguir (decisión del usuario, 2026-10-18).
@@ -163,7 +165,7 @@ class ConduccionViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'])
     def hoy(self, request):
         """GET /api/conducciones/hoy/ — la Conducción de hoy del chofer (o
-        null) y su IPC de hoy (sin IPC no se llena)."""
+        null) y su IPC de hoy (o null)."""
         actor = self._del_chofer(request)
         hoy = timezone.localdate()
         c = self._con_todo(Conduccion.objects.filter(chofer=actor, fecha=hoy)).first()
@@ -190,13 +192,11 @@ class ConduccionViewSet(viewsets.ViewSet):
     def create(self, request):
         """POST /api/conducciones/ {controles, camion?, sst | codigo}
 
-        La de hoy: después del IPC de hoy, uno por día. Si algún control sale
-        No, avisa y la deja igual."""
+        La de hoy, una por día; no pide IPC, pero si ya lo hizo la liga a
+        él. Si algún control sale No, avisa y la deja igual."""
         actor = self._del_chofer(request)
         hoy = timezone.localdate()
         ipc = IPC.objects.filter(responsable=actor, fecha=hoy).order_by('-id_ipc').first()
-        if ipc is None:
-            raise ErrorNegocio('Primero haz tu IPC de hoy: la Conducción va después.')
         if Conduccion.objects.filter(chofer=actor, fecha=hoy).exists():
             raise ErrorNegocio('Ya tienes tu Conducción de hoy: súmale la SST.')
         controles = F.limpiar_controles(request.data.get('controles'))

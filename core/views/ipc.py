@@ -299,6 +299,9 @@ class IPCViewSet(viewsets.ViewSet):
             self._sumar_participante(ipc, actor, conforme=True)
             for u in participantes:
                 self._sumar_participante(ipc, u)
+            # El chofer que llenó antes su Conducción de hoy: queda ligada.
+            Conduccion.objects.filter(chofer=actor, fecha=ipc.fecha,
+                                      ipc__isnull=True).update(ipc=ipc)
         self._avisar_participantes(ipc, participantes)
         return self._responder(ipc, actor, status=201)
 

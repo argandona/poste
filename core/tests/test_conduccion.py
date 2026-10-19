@@ -63,12 +63,15 @@ class ConduccionTests(BaseAPITestCase):
         self.assertEqual(d['responsable_nombre'], 'Chofer Uno')
         self.assertEqual([s['sst'] for s in d['ssts']], ['SST-1'])
 
-    def test_sin_ipc_de_hoy_no_se_llena(self):
+    def test_sin_ipc_tambien_se_llena_y_el_ipc_de_despues_la_liga(self):
         r, _ = self.crear()
-        self.assertEqual(r.status_code, 400)
-        self.assertIn('Primero haz tu IPC', r.json()['detail'])
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertIsNone(r.json()['ipc'])
         self.auth(self.chofer)
         self.assertIsNone(self.client.get(f'{URL}hoy/').json()['ipc_de_hoy'])
+        ipc = self.ipc_del_chofer()
+        c = Conduccion.objects.get(pk=r.json()['id_conduccion'])
+        self.assertEqual(c.ipc_id, ipc['id_ipc'])
 
     def test_le_ofrece_el_camion_y_las_sst_de_su_responsable(self):
         self.auth(self.chofer)
