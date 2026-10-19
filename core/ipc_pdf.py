@@ -20,7 +20,8 @@ from reportlab.platypus import (Image, Paragraph, SimpleDocTemplate, Spacer,
 from . import ipc_formato as F
 
 ICONOS = Path(__file__).resolve().parent / 'data' / 'ipc'
-LOGO = Path(__file__).resolve().parent / 'data' / 'logo_encossa.png'
+# Solo "Encossa", sin la leyenda de abajo (IPC y Conducción, 2026-10-19).
+LOGO = Path(__file__).resolve().parent / 'data' / 'logo_encossa_sin_leyenda.png'
 ANCHO = A4[0] - 2.4 * cm
 
 AMARILLO = colors.HexColor('#FFF200')
