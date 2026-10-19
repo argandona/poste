@@ -14,6 +14,8 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
+from core.management.produccion import agregar_opcion, proteger
+
 from core.models import ManoDeObra
 
 
@@ -21,11 +23,13 @@ class Command(BaseCommand):
     help = "Carga partidas de mano de obra desde un archivo TSV."
 
     def add_arguments(self, parser):
+        agregar_opcion(parser)
         parser.add_argument("--archivo", default="core/data/mano_de_obra.txt",
                             help="Ruta al archivo (relativa a la carpeta del proyecto).")
 
     @transaction.atomic
     def handle(self, *args, **opts):
+        proteger('cargar_mano_de_obra', opts)
         ruta = Path(settings.BASE_DIR) / opts["archivo"]
         if not ruta.exists():
             raise CommandError(f"No existe el archivo: {ruta}")

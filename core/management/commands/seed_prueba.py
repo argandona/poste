@@ -19,6 +19,8 @@ from django.core.management.base import BaseCommand
 from django.contrib.auth.hashers import make_password
 from django.db import transaction
 
+from core.management.produccion import agregar_opcion, proteger
+
 from core.models import (
     Empresa, Rol, Usuario, Camion, UsuarioCamion, Almacen, Actividad,
     Material, ManoDeObra, TipoTrabajo, ActividadTipoTrabajo,
@@ -50,8 +52,12 @@ POSTE_MAT = ['5331596', '5331616', '5411056', '5111102', '5131920', '5114702',
 class Command(BaseCommand):
     help = "Siembra un entorno de prueba completo (usuarios, catálogos, tipos de trabajo)."
 
+    def add_arguments(self, parser):
+        agregar_opcion(parser)
+
     @transaction.atomic
     def handle(self, *args, **options):
+        proteger('seed_prueba', options)
         # ── Roles ──
         for id_rol, desc in ROLES.items():
             Rol.objects.update_or_create(id_rol=id_rol, defaults={"descripcion": desc})
@@ -96,9 +102,10 @@ class Command(BaseCommand):
                           fecha_inicio=date.today()).save()
 
         # ── Catálogos: mano de obra + materiales + recuperos + stock ──
-        call_command("cargar_mano_de_obra")
+        forzar = {"forzar_produccion": options.get("forzar_produccion", False)}
+        call_command("cargar_mano_de_obra", **forzar)
         call_command("cargar_recuperos")
-        call_command("cargar_saldo_camion", placa="ABC-123")
+        call_command("cargar_saldo_camion", placa="ABC-123", **forzar)
 
         # Saldo especial pedido: cable 5031165 a 500
         m5031165 = Material.objects.filter(matricula="5031165").first()

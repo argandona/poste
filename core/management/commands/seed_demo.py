@@ -16,6 +16,8 @@ from django.core.management.base import BaseCommand
 from django.contrib.auth.hashers import make_password
 from django.db import transaction
 
+from core.management.produccion import agregar_opcion, proteger
+
 from core.models import (
     Empresa, Rol, Usuario, Camion, UsuarioCamion, Actividad, SST,
     Suministro, Material, Almacen, StockCamion, StockAlmacen,
@@ -39,8 +41,12 @@ ROLES = {
 class Command(BaseCommand):
     help = "Carga datos de demostración para TECSUR."
 
+    def add_arguments(self, parser):
+        agregar_opcion(parser)
+
     @transaction.atomic
     def handle(self, *args, **options):
+        proteger('seed_demo', options)
         for id_rol, desc in ROLES.items():
             Rol.objects.update_or_create(id_rol=id_rol, defaults={"descripcion": desc})
         self.stdout.write("Roles listos.")

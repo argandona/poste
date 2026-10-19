@@ -15,6 +15,8 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
+from core.management.produccion import agregar_opcion, proteger
+
 from core.models import Camion, Material, StockCamion
 
 
@@ -22,6 +24,7 @@ class Command(BaseCommand):
     help = "Carga materiales y fija el saldo de un camión desde un archivo TSV."
 
     def add_arguments(self, parser):
+        agregar_opcion(parser)
         parser.add_argument("--placa", default="ABC-123",
                             help="Placa del camión (por defecto ABC-123).")
         parser.add_argument("--archivo", default="core/data/materiales_camion.txt",
@@ -29,6 +32,7 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **opts):
+        proteger('cargar_saldo_camion', opts)
         placa = opts["placa"]
         ruta = Path(settings.BASE_DIR) / opts["archivo"]
         if not ruta.exists():
