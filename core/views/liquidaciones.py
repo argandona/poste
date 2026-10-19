@@ -569,11 +569,24 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
         con N = cambios de poste de ese poste. Luego se AGREGA por SST para
         mostrar. La actividad se detecta por el tipo de trabajo liquidado.
         Para que descuente, el poste y su alumbrado deben liquidarse en el
-        MISMO suministro."""
-        usuario_id = request.query_params.get('usuario')
+        MISMO suministro.
+
+        Quien liquida (capataz, encargado) ve solo lo suyo aunque pida otro;
+        el liquidador, el coordinador y el SuperAdmin, el de todos o el de
+        uno, siempre de su empresa (el SuperAdmin, de todas)."""
+        actor = (Usuario.objects.select_related('rol')
+                 .filter(pk=request.user.id_usuario).first())
+        if actor is None or not actor.puede_ver_consolidado():
+            raise PermissionDenied('No puedes ver el consolidado.')
         qs = (LiquidacionSuministro.objects
               .select_related('tipo_trabajo', 'suministro')
               .prefetch_related('partidas__mano_de_obra'))
+        if not actor.es_superadmin() and actor.empresa_id:
+            qs = qs.filter(usuario__empresa_id=actor.empresa_id)
+        if actor.puede_ver_consolidado_de_todos():
+            usuario_id = request.query_params.get('usuario')
+        else:
+            usuario_id = actor.pk
         if usuario_id:
             qs = qs.filter(usuario_id=usuario_id)
 
@@ -702,14 +715,10 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
         nombre del usuario local. Agrupa por día de programación e incluye los
         TipoTrabajo disponibles según la Actividad de cada suministro.
         """
-        usuario_id = request.query_params.get('usuario')
-        if not usuario_id:
+        if not request.query_params.get('usuario'):
             return Response({'detail': 'Parámetro usuario requerido.'}, status=400)
-
-        try:
-            usuario = Usuario.objects.get(pk=usuario_id)
-        except Usuario.DoesNotExist:
-            return Response({'detail': 'Usuario no encontrado.'}, status=404)
+        usuario = usuario_consultado(
+            request, lambda a: a.puede_ver_datos_de_otros())
 
         # Mapa actividad_nombre → lista de TipoTrabajo (local)
         atts = (ActividadTipoTrabajo.objects
@@ -848,14 +857,10 @@ class PlanoSSTViewSet(viewsets.ModelViewSet):
         (lunes–domingo), agrupados por fecha de programación y deduplicados por
         código de SST, marcando cuáles ya tienen plano.
         """
-        usuario_id = request.query_params.get('usuario')
-        if not usuario_id:
+        if not request.query_params.get('usuario'):
             return Response({'detail': 'Parámetro usuario requerido.'}, status=400)
-
-        try:
-            usuario = Usuario.objects.get(pk=usuario_id)
-        except Usuario.DoesNotExist:
-            return Response({'detail': 'Usuario no encontrado.'}, status=404)
+        usuario = usuario_consultado(
+            request, lambda a: a.puede_ver_datos_de_otros())
 
         # Todas las SST asignadas pendientes (sin filtro de semana)
         suministros = _suministros_asignados_usuario(usuario)

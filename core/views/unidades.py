@@ -150,13 +150,10 @@ class UsuarioCamionViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def camion_activo(self, request):
         """GET /api/usuario-camion/camion_activo/?usuario=<id>"""
-        usuario_id = request.query_params.get('usuario')
-        if not usuario_id:
+        if not request.query_params.get('usuario'):
             return Response({'detail': 'Parámetro usuario requerido.'}, status=400)
-        try:
-            usuario = Usuario.objects.get(pk=usuario_id)
-        except Usuario.DoesNotExist:
-            return Response({'detail': 'Usuario no encontrado.'}, status=404)
+        usuario = usuario_consultado(
+            request, lambda a: a.puede_ver_datos_de_otros())
         camion = UsuarioCamion.camion_activo_de_usuario(usuario)
         if camion:
             return Response(CamionSerializer(camion).data)
@@ -309,11 +306,21 @@ class StockCamionViewSet(viewsets.ReadOnlyModelViewSet):
         GET /api/stock-camion/por_camion/
         Devuelve camiones agrupados con sus materiales en stock (cantidad > 0).
         ?usuario=<id>  → solo camiones asignados a ese usuario
+
+        Cada uno ve los de sus camiones; todos los camiones (sin `usuario`) o
+        los de otro, solo el almacén y el SuperAdmin, de su empresa.
         """
         from datetime import date
         from django.db.models import Q
 
-        usuario_id = request.query_params.get('usuario')
+        almacen = lambda a: a.puede_gestionar_almacen()
+        usuario_id = None
+        if request.query_params.get('usuario'):
+            usuario_id = usuario_consultado(request, almacen).pk
+        else:
+            actor = usuario_consultado(request, almacen)
+            if not almacen(actor):
+                raise PermissionDenied('Solo el almacén ve los saldos de todos los camiones.')
 
         # Encargado ve solo materiales con stock > 0 (su vista no muestra negativos).
         # Enc. almacén (sin usuario_id) ve todo, incluyendo negativos.
@@ -328,6 +335,8 @@ class StockCamionViewSet(viewsets.ReadOnlyModelViewSet):
             qs = (StockCamion.objects.exclude(cantidad=0)
                   .select_related('camion', 'material')
                   .order_by('material__matricula'))
+            if not actor.es_superadmin() and actor.empresa_id:
+                qs = qs.filter(camion__empresa_id=actor.empresa_id)
 
         hoy = date.today()
         asignaciones = {

@@ -15,9 +15,10 @@ class SSTViewSet(viewsets.ModelViewSet):
         """GET /api/ssts/mis_sst/?usuario=<id>&pendientes=1 — SSTs donde el
         usuario es encargado. Con `pendientes`, sin las que ya liquidó entera
         (es lo que ofrece el IPC: lo liquidado ya se ejecutó con su IPC)."""
-        usuario_id = request.query_params.get('usuario')
-        if not usuario_id:
+        if not request.query_params.get('usuario'):
             return Response({'detail': 'Parámetro usuario requerido.'}, status=400)
+        usuario_id = usuario_consultado(
+            request, lambda a: a.puede_ver_datos_de_otros()).pk
         sst_ids = set(SSTEncargado.objects.filter(usuario_id=usuario_id)
                       .values_list('sst_id', flat=True))
         if request.query_params.get('pendientes'):
