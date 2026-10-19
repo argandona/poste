@@ -90,7 +90,10 @@ class Usuario(models.Model):
     # Entregar EPP directamente a un trabajador, sin que lo pida.
     def puede_asignar_epp(self): return self._tiene(Rol.SUPERADMIN)
     # El IPC lo hacen el capataz y el encargado, antes de empezar en campo.
-    def puede_hacer_ipc(self): return self._tiene(Rol.CAPATAZ, Rol.ENCARGADO)
+    # El chofer hace su propio IPC antes de manejar (2026-10-18).
+    def puede_hacer_ipc(self): return self._tiene(Rol.CAPATAZ, Rol.ENCARGADO, Rol.CHOFER)
+    # El formato de Conducción: solo el chofer, cada día.
+    def puede_hacer_conduccion(self): return self._tiene(Rol.CHOFER)
     # Ver todos los IPC de la empresa (no solo los propios).
     def puede_ver_todos_los_ipc(self): return self._tiene(Rol.SUPERADMIN, Rol.COORDINADOR)
     # Pedir EPP para uno mismo: todo el que sale a obra.
@@ -1252,6 +1255,49 @@ class IPCParticipante(models.Model):
         db_table = "ipc_participante"
         ordering = ["id_participante"]
         unique_together = ("ipc", "usuario")
+
+
+class Conduccion(models.Model):
+    """Formato de Conducción (F03-IA-QHSE-001): el chofer lo llena cada día
+    antes de manejar, después de su IPC. Responde los 8 controles y empieza con
+    una SST; durante el día le suma las demás, cada una con su firma. Uno por
+    chofer y día. El camión es el que maneja (de su salida, o el que eligió):
+    a su responsable se le avisa si un control sale No."""
+    id_conduccion   = models.AutoField(primary_key=True)
+    empresa         = models.ForeignKey("Empresa", on_delete=models.PROTECT, related_name="conducciones", null=True, blank=True)
+    chofer          = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name="conducciones")
+    camion          = models.ForeignKey(Camion, on_delete=models.PROTECT, related_name="conducciones", null=True, blank=True)
+    # El IPC del chofer de ese día: sin él no se llena.
+    ipc             = models.ForeignKey(IPC, on_delete=models.PROTECT, related_name="conducciones", null=True, blank=True)
+    fecha           = models.DateField()
+    creada          = models.DateTimeField(auto_now_add=True)
+    # El cargo se copia: es un documento firmado.
+    cargo           = models.CharField(max_length=100, blank=True)
+    formato_codigo  = models.CharField(max_length=30)
+    formato_version = models.CharField(max_length=10)
+    # {clave del control: "si" | "no"}; ver core/conduccion_formato.py.
+    controles       = models.JSONField(default=dict)
+
+    class Meta:
+        db_table = "conduccion"
+        ordering = ["-fecha", "-id_conduccion"]
+        unique_together = ("chofer", "fecha")
+
+
+class ConduccionSST(models.Model):
+    """Una fila de la tabla de firmas: el chofer firma (confirma desde su app)
+    por cada SST a la que maneja en el día. Como en el IPC, la SST es una del
+    sistema o una escrita a mano (`sst` vacío); `codigo` siempre se guarda."""
+    id_conduccion_sst = models.AutoField(primary_key=True)
+    conduccion = models.ForeignKey(Conduccion, on_delete=models.CASCADE, related_name="ssts")
+    sst        = models.ForeignKey(SST, on_delete=models.PROTECT, related_name="conducciones", null=True, blank=True)
+    codigo     = models.CharField(max_length=20)
+    orden      = models.PositiveIntegerField(default=0)
+    firmada    = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "conduccion_sst"
+        ordering = ["orden", "id_conduccion_sst"]
 
 
 # ── Camiones: kilometraje y combustible ──────────────────────────────────────
