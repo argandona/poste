@@ -4,9 +4,26 @@ from .comun import *  # noqa: F401,F403
 
 # ── Empresa ─────────────────────────────────────────────────────────────────
 class EmpresaViewSet(viewsets.ModelViewSet):
+    """Las empresas. Cada uno ve la suya (el SuperAdmin, todas); crearlas y
+    editarlas, solo el SuperAdmin. No se borran: se desactivan, porque sus
+    usuarios, camiones y almacenes las nombran."""
     serializer_class   = EmpresaSerializer
-    queryset           = Empresa.objects.all()
+    queryset           = Empresa.objects.order_by('nombre')
     permission_classes = [permissions.IsAuthenticated]
+    http_method_names  = ['get', 'post', 'put', 'patch', 'head', 'options']
+
+    def _solo_superadmin(self, request):
+        actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
+        if not (actor and actor.es_superadmin()):
+            raise PermissionDenied('Solo el SuperAdmin gestiona empresas.')
+
+    def create(self, request, *args, **kwargs):
+        self._solo_superadmin(request)
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        self._solo_superadmin(request)
+        return super().update(request, *args, **kwargs)
 
     def get_queryset(self):
         return qs_empresa(super().get_queryset(), self.request, 'id_empresa')
