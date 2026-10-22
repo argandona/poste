@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.db import models
 from rest_framework import serializers
+from rest_framework.validators import UniqueValidator
 
 from .errores import ErrorNegocio
 from .models import (
@@ -31,6 +32,9 @@ class EmpresaSerializer(serializers.ModelSerializer):
     class Meta:
         model  = Empresa
         fields = '__all__'
+        extra_kwargs = {'ruc': {'validators': [UniqueValidator(
+            queryset=Empresa.objects.all(),
+            message='Ya hay una empresa con ese RUC.')]}}
 
 
 # ── Rol ─────────────────────────────────────────
