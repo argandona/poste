@@ -39,3 +39,16 @@ class SaldosSoloLecturaTests(BaseAPITestCase):
         self.assertEqual(r.json()[0]['placa'], 'ABC-123')
         self.assertEqual(self.client.get(f'/api/stock-camion/?camion={self.camion.pk}').status_code, 200)
         self.assertEqual(self.client.get('/api/stock-almacen/').status_code, 200)
+
+    def test_el_stock_del_almacen_llega_entero_y_por_descripcion(self):
+        """La pantalla del almacén lo pide de una vez: antes venía de a 20."""
+        from ..models import Material, StockAlmacen
+        for i in range(30):
+            m = Material.objects.create(matricula=f'Z{i:03}', descripcion=f'Z material {i:03}', precio=1)
+            StockAlmacen.objects.create(almacen=self.almacen, material=m, cantidad=i)
+        r = self.client.get(f'/api/stock-almacen/?almacen={self.almacen.pk}&page_size=2000')
+        self.assertEqual(r.status_code, 200)
+        filas = r.json()['results']
+        self.assertEqual(len(filas), 31)
+        descripciones = [f['material_descripcion'] for f in filas]
+        self.assertEqual(descripciones, sorted(descripciones))

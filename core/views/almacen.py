@@ -101,9 +101,12 @@ class StockAlmacenViewSet(viewsets.ReadOnlyModelViewSet):
     # devoluciones aprobadas, que dejan registro.
     serializer_class   = StockAlmacenSerializer
     permission_classes = [permissions.IsAuthenticated]
+    # La pantalla "Saldo del Almacén" lo pide entero, no de a 20.
+    pagination_class   = CatalogoPagination
 
     def get_queryset(self):
-        qs = StockAlmacen.objects.select_related('almacen','material')
+        qs = (StockAlmacen.objects.select_related('almacen','material')
+              .order_by('material__descripcion', 'pk'))
         almacen_id = self.request.query_params.get('almacen')
         if almacen_id:
             qs = qs.filter(almacen_id=almacen_id)
