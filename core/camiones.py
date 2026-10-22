@@ -532,7 +532,8 @@ SMAC_PARTIDA = 'base de principal (Villa el salvador)'
 def hoja_smac(ws, informe, contratista, responsable):
     """F09-PA-SMAC-007, Reporte de kilometraje de unidades vehiculares de las
     contratistas: una fila por salida, con la primera SST que eligió el chofer
-    (o TRABAJO INTERNO) y su distrito como destino."""
+    (o lo escrito en trabajo interno, que suele ser una SST a mano) y su
+    distrito como destino."""
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
     fino = Side(style='thin')
@@ -592,7 +593,9 @@ def hoja_smac(ws, informe, contratista, responsable):
             sst = int(primera['sst']) if primera['sst'].isdigit() else primera['sst']
             destino = primera['distrito'] or j['distrito_interno']
         else:
-            sst, destino = 'TRABAJO INTERNO', j['distrito_interno']
+            sst = j['trabajo_interno'].strip() or 'TRABAJO INTERNO'
+            sst = int(sst) if sst.isdigit() else sst
+            destino = j['distrito_interno']
         cerrada = j['km_cierre'] is not None
         valores = [i, j['fecha'], None, sst, j['camion_placa'], SMAC_TRANSPORTE,
                    j['combustible'].upper(), SMAC_PARTIDA, destino, j['km_salida'],

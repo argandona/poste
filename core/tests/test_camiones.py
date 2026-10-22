@@ -250,7 +250,7 @@ class CamionesTests(BaseAPITestCase):
         SSTEncargado.objects.create(sst=otra, usuario=self.capataz)
         jid = self.salir(1000, ssts=[otra.pk, self.sst.pk], personas=6).json()['id_jornada']
         self.cerrar(jid, 1085)
-        self.salir(1085, ssts=[], trabajo_interno='Almacén', distrito_interno='Ate')
+        self.salir(1085, ssts=[], trabajo_interno=' 3907399 ', distrito_interno='Ate')
 
         hoy = timezone.localdate()
         self.auth(self.coordinador)
@@ -265,7 +265,7 @@ class CamionesTests(BaseAPITestCase):
                                     1000, 1085, '=L7-K7', 6])
         fila = [c.value for c in ws[8]][1:14]
         self.assertEqual((fila[3], fila[8], fila[10], fila[11], fila[12]),
-                         ('TRABAJO INTERNO', 'Ate', 'SIN CIERRE', None, 4))
+                         (3907399, 'Ate', 'SIN CIERRE', None, 4))
 
     def test_salida_sin_cierre_de_un_dia_anterior(self):
         jid = self.salir(1000).json()['id_jornada']
