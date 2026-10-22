@@ -31,6 +31,15 @@ class InventarioConDecimalesTests(BaseAPITestCase):
     def detalle(self, datos, material):
         return next(d for d in datos["detalles"] if d["material"] == material.pk)
 
+    def test_un_camion_dado_de_baja_no_se_inventaria(self):
+        self.camion.activo = False
+        self.camion.save(update_fields=["activo"])
+        resp = self.client.post("/api/inventarios/iniciar_o_continuar/", {
+            "camion": self.camion.pk, "usuario": self.capataz.pk}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("dado de baja", resp.json()["detail"])
+        self.assertFalse(Inventario.objects.exists())
+
     def test_abre_con_el_saldo_exacto_del_camion(self):
         datos = self.iniciar()
         self.assertEqual(self.detalle(datos, self.material_a)["cantidad_teorica"], 2.5)

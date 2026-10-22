@@ -520,6 +520,10 @@ class InventarioViewSet(viewsets.ModelViewSet):
             usuario = Usuario.objects.get(pk=usuario_id)
         except (Camion.DoesNotExist, Usuario.DoesNotExist):
             return Response({'detail': 'Camión o usuario no encontrado.'}, status=404)
+        # Dado de baja no tiene qué contar: para darlo de baja se liberó su
+        # responsable, y liberar exige el camión en cero.
+        if not camion.activo:
+            raise ErrorNegocio(f'{camion.placa} está dado de baja: no se inventaría.')
 
         hoy  = _date.today()
         mes  = hoy.month
