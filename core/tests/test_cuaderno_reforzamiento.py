@@ -37,6 +37,8 @@ class CuadernoReforzamientoTests(BaseAPITestCase):
             partida='*098822', descripcion='ROTURA', precio='78.09')
         self.tubo = ManoDeObra.objects.create(
             partida='*098203', descripcion='TUBO CORRUGADO', precio='10')
+        self.pat = ManoDeObra.objects.create(
+            partida='*099090', descripcion='ROTULACION DE PAT', precio='10')
         self.refuerzo = Material.objects.create(
             matricula='6913292', descripcion='REFUERZO DE FIBRA 8,7 / 200',
             precio='1')
@@ -174,6 +176,18 @@ class CuadernoReforzamientoTests(BaseAPITestCase):
         self.liquidar(partidas=[self.cimentacion])
         [h] = reunir_reforzamiento(self.sst)
         self.assertFalse(h.tubo_corrugado)
+        self.assertFalse(h.pozo_a_tierra)
+
+    def test_el_pozo_a_tierra_rotulado_sale_marcado(self):
+        self.liquidar(partidas=[self.pat])
+        [h] = reunir_reforzamiento(self.sst)
+        self.assertEqual((h.pozo_a_tierra, h.tubo_corrugado), (True, False))
+        self.assertTrue(generar_pdf_reforzamiento([h]).startswith(b'%PDF'))
+        sst = self.sst_de(SIN, '7005')
+        self.liquidar(tipo='Reforzamiento sin vereda', sst=sst,
+                      partidas=[self.pat])
+        [h] = reunir_reforzamiento(sst)
+        self.assertTrue(h.pozo_a_tierra)
 
     def test_el_check_se_dibuja_solo_si_esta_marcado(self):
         c = mock.MagicMock()

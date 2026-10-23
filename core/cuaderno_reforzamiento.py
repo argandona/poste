@@ -42,6 +42,7 @@ SUPERVISOR = 'MAYCOL ALTAMIRANO'
 CIMENTACION = '*094919'
 ROTURA_CIMENTACION = '*098822'
 TUBO_CORRUGADO = '*098203'
+ROTULACION_PAT = '*099090'
 FLEJE = '1014213'
 HEBILLA = '1014308'
 GEL = '2139148'
@@ -68,6 +69,8 @@ class Hoja:
     rotura: str = ''
     # La pregunta "¿Se instaló tubo corrugado?": sale como casilla marcada.
     tubo_corrugado: bool = False
+    # "¿Se rotuló el PAT?": también como casilla marcada.
+    pozo_a_tierra: bool = False
     poste_existente: str = ''
     refuerzo: str = ''
     panos: list = field(default_factory=list)   # vereda: hasta 3 renglones
@@ -172,6 +175,7 @@ def hoja_de(liq, sst):
         cimentacion=marca(CIMENTACION),
         rotura=marca(ROTURA_CIMENTACION),
         tubo_corrugado=partidas.get(TUBO_CORRUGADO, 0) > 0,
+        pozo_a_tierra=partidas.get(ROTULACION_PAT, 0) > 0,
         poste_existente=str(textos.get('poste_existente') or '').strip(),
         refuerzo=', '.join(refuerzos),
         panos=en_renglones(vereda, RENGLONES_VEREDA),
@@ -337,6 +341,8 @@ def _pagina(c, h):
              con.rotura, sin.rotura),
             ('SE USO TUBO CORRUGADO', 'SE USO TUBO CORRUGADO',
              con.tubo_corrugado, sin.tubo_corrugado),
+            ('SE ROTULO POZO A TIERRA', 'SE ROTULO POZO A TIERRA',
+             con.pozo_a_tierra, sin.pozo_a_tierra),
             ('POSTE EXISTENTE', 'POSTE EXISTENTE',
              con.poste_existente, sin.poste_existente),
             ('REFUERZO INSTALADO', 'REFUERZO INSTALADO',
