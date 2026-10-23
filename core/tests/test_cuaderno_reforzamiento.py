@@ -8,7 +8,8 @@ con lo de siempre.
 from datetime import date
 from unittest import mock
 
-from ..cuaderno_reforzamiento import (VACIO, _casilla, _pagina, _subrayado,
+from ..cuaderno_reforzamiento import (VACIO, _casilla, _pagina, _renglon,
+                                      _subrayado,
                                       en_renglones, generar_pdf_reforzamiento,
                                       reunir_reforzamiento)
 from ..models import (SST, Actividad, ConsumoMaterialSuministro,
@@ -34,6 +35,8 @@ class CuadernoReforzamientoTests(BaseAPITestCase):
             partida='*094919', descripcion='CIMENTACION', precio='56.35')
         self.rotura = ManoDeObra.objects.create(
             partida='*098822', descripcion='ROTURA', precio='78.09')
+        self.tubo = ManoDeObra.objects.create(
+            partida='*098203', descripcion='TUBO CORRUGADO', precio='10')
         self.refuerzo = Material.objects.create(
             matricula='6913292', descripcion='REFUERZO DE FIBRA 8,7 / 200',
             precio='1')
@@ -155,6 +158,32 @@ class CuadernoReforzamientoTests(BaseAPITestCase):
         _casilla(c, 0, 0, '8,7 / 200')
         c.drawCentredString.assert_called_once_with(mock.ANY, 0, '8,7 / 200')
         self.assertEqual(VACIO, '-')
+
+    def test_el_tubo_corrugado_sale_marcado(self):
+        self.liquidar(partidas=[self.tubo])
+        [h] = reunir_reforzamiento(self.sst)
+        self.assertTrue(h.tubo_corrugado)
+        self.assertTrue(generar_pdf_reforzamiento([h]).startswith(b'%PDF'))
+        sst = self.sst_de(SIN, '7004')
+        self.liquidar(tipo='Reforzamiento sin vereda', sst=sst,
+                      partidas=[self.tubo])
+        [h] = reunir_reforzamiento(sst)
+        self.assertTrue(h.tubo_corrugado)
+
+    def test_sin_tubo_corrugado_el_check_queda_vacio(self):
+        self.liquidar(partidas=[self.cimentacion])
+        [h] = reunir_reforzamiento(self.sst)
+        self.assertFalse(h.tubo_corrugado)
+
+    def test_el_check_se_dibuja_solo_si_esta_marcado(self):
+        c = mock.MagicMock()
+        _renglon(c, 0, 0, 'SE USO TUBO CORRUGADO', True, 300)
+        self.assertEqual(c.line.call_count, 2)
+        c.drawCentredString.assert_not_called()
+        c = mock.MagicMock()
+        _renglon(c, 0, 0, 'SE USO TUBO CORRUGADO', False, 300)
+        c.line.assert_not_called()
+        c.rect.assert_called_once()
 
     def test_sin_respuesta_la_casilla_queda_vacia(self):
         self.liquidar()
