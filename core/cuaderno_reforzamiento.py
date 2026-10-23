@@ -41,6 +41,7 @@ SUPERVISOR = 'MAYCOL ALTAMIRANO'
 
 CIMENTACION = '*094919'
 ROTURA_CIMENTACION = '*098822'
+TUBO_CORRUGADO = '*098203'
 FLEJE = '1014213'
 HEBILLA = '1014308'
 GEL = '2139148'
@@ -65,6 +66,8 @@ class Hoja:
     con_vereda: bool = True
     cimentacion: str = ''
     rotura: str = ''
+    # La pregunta "¿Se instaló tubo corrugado?": sale como casilla marcada.
+    tubo_corrugado: bool = False
     poste_existente: str = ''
     refuerzo: str = ''
     panos: list = field(default_factory=list)   # vereda: hasta 3 renglones
@@ -168,6 +171,7 @@ def hoja_de(liq, sst):
         con_vereda=liq.tipo_trabajo.nombre == TIPO_CON_VEREDA,
         cimentacion=marca(CIMENTACION),
         rotura=marca(ROTURA_CIMENTACION),
+        tubo_corrugado=partidas.get(TUBO_CORRUGADO, 0) > 0,
         poste_existente=str(textos.get('poste_existente') or '').strip(),
         refuerzo=', '.join(refuerzos),
         panos=en_renglones(vereda, RENGLONES_VEREDA),
@@ -230,10 +234,33 @@ def _casilla(c, x, y, texto=''):
     c.drawCentredString(x + _CASILLA / 2, y, texto)
 
 
+def _check(c, x, y, marcado):
+    """Un cuadradito centrado donde iría la casilla, con un check si se
+    marcó. Sin marcar queda vacío, como en el papel."""
+    lado = _ALTO_CASILLA
+    x0 = x + (_CASILLA - lado) / 2
+    c.setLineWidth(0.8)
+    c.rect(x0, y - 0.12 * cm, lado, lado)
+    if marcado:
+        # El check a trazos: con una fuente de símbolos, algunos visores
+        # muestran un cuadrado lleno.
+        abajo = y - 0.12 * cm
+        c.setLineWidth(1.6)
+        c.line(x0 + lado * 0.2, abajo + lado * 0.5,
+               x0 + lado * 0.42, abajo + lado * 0.22)
+        c.line(x0 + lado * 0.42, abajo + lado * 0.22,
+               x0 + lado * 0.82, abajo + lado * 0.82)
+
+
 def _renglon(c, x_etiqueta, y, etiqueta, valor, ancho_columna):
+    """Etiqueta y casilla. Si el valor es sí o no, la casilla es un check."""
     _texto_que_entra(c, etiqueta, ancho_columna - _CASILLA - 0.2 * cm)
     c.drawString(x_etiqueta, y, etiqueta)
-    _casilla(c, x_etiqueta + ancho_columna - _CASILLA, y, valor)
+    x = x_etiqueta + ancho_columna - _CASILLA
+    if isinstance(valor, bool):
+        _check(c, x, y, valor)
+    else:
+        _casilla(c, x, y, valor)
 
 
 def _subrayado(c, x, y, texto, ancho):
@@ -308,6 +335,8 @@ def _pagina(c, h):
              con.cimentacion, sin.cimentacion),
             ('ROTURA DE CIMENTACION', 'ROTURA DE CIMENTACION',
              con.rotura, sin.rotura),
+            ('SE USO TUBO CORRUGADO', 'SE USO TUBO CORRUGADO',
+             con.tubo_corrugado, sin.tubo_corrugado),
             ('POSTE EXISTENTE', 'POSTE EXISTENTE',
              con.poste_existente, sin.poste_existente),
             ('REFUERZO INSTALADO', 'REFUERZO INSTALADO',
