@@ -1,8 +1,8 @@
 """
 Los catálogos son de todas las empresas: materiales, partidas con su precio,
-actividades y tipos de trabajo. Verlos puede cualquiera con sesión; cambiar
-materiales y partidas, solo el SuperAdmin; actividades y tipos de trabajo,
-el Coordinador (o el SuperAdmin). Materiales y partidas no se borran.
+actividades y tipos de trabajo. Verlos puede cualquiera con sesión;
+cambiarlos, solo el SuperAdmin (ni el Coordinador). Materiales y partidas no
+se borran.
 """
 from ..models import (Actividad, Empresa, ManoDeObra, Material, Rol,
                       TipoTrabajo, Usuario)
@@ -107,8 +107,9 @@ class CatalogosProtegidosTests(BaseAPITestCase):
 
     # ── Actividades y tipos de trabajo ──────────────────────────────────────
 
-    def test_sin_ser_coordinador_no_se_editan_ni_borran(self):
-        for quien in (self.capataz, self.encargado, self.de_otra):
+    def test_sin_ser_superadmin_no_se_editan_ni_borran(self):
+        for quien in (self.capataz, self.encargado, self.coordinador,
+                      self.de_otra):
             self.auth(quien)
             for ruta in (f'/api/actividades/{self.actividad.pk}/',
                          f'/api/tipos-trabajo/{self.tipo.pk}/'):
@@ -121,10 +122,28 @@ class CatalogosProtegidosTests(BaseAPITestCase):
         self.assertEqual(TipoTrabajo.objects.get(pk=self.tipo.pk).nombre,
                          'Tipo X')
 
-    def test_el_coordinador_edita_el_tipo_de_trabajo(self):
+    def test_el_coordinador_no_crea_ni_configura(self):
         self.auth(self.coordinador)
+        r = self.client.post('/api/actividades/', {'nombre': 'Nueva'},
+                             format='json')
+        self.assertEqual(r.status_code, 403)
+        r = self.client.post('/api/tipos-trabajo/', {'nombre': 'Nuevo'},
+                             format='json')
+        self.assertEqual(r.status_code, 403)
+        for accion in ('set_actividades', 'set_mano_de_obra', 'set_materiales'):
+            r = self.client.post(f'/api/tipos-trabajo/{self.tipo.pk}/{accion}/',
+                                 {'ids': []}, format='json')
+            self.assertEqual(r.status_code, 403, accion)
+        self.assertFalse(Actividad.objects.filter(nombre='Nueva').exists())
+
+    def test_el_superadmin_configura(self):
+        self.auth(self.admin)
         r = self.client.patch(f'/api/tipos-trabajo/{self.tipo.pk}/',
                               {'nombre': 'Tipo Y'}, format='json')
         self.assertEqual(r.status_code, 200, r.content)
-        self.assertEqual(TipoTrabajo.objects.get(pk=self.tipo.pk).nombre,
-                         'Tipo Y')
+        r = self.client.post('/api/actividades/', {'nombre': 'Nueva'},
+                             format='json')
+        self.assertEqual(r.status_code, 201, r.content)
+        r = self.client.post(f'/api/tipos-trabajo/{self.tipo.pk}/set_mano_de_obra/',
+                             {'ids': [self.partida.pk]}, format='json')
+        self.assertEqual(r.status_code, 200, r.content)
