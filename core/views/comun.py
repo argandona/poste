@@ -166,6 +166,14 @@ def _render_suministros(nombre_usuario, fecha_desde=None, fecha_hasta=None):
     return _suministros_asignados_usuario(usuario, fecha_desde, fecha_hasta)
 
 # ── Helper: retorna queryset filtrado por empresa del usuario autenticado ──
+def solo_superadmin(request, mensaje):
+    """Corta con 403 si quien pide no es SuperAdmin."""
+    actor = Usuario.objects.filter(
+        pk=getattr(request.user, 'id_usuario', None)).first()
+    if not (actor and actor.es_superadmin()):
+        raise PermissionDenied(mensaje)
+
+
 def qs_empresa(qs, request, campo='empresa'):
     """
     Si el usuario autenticado es SuperAdmin ve todo.

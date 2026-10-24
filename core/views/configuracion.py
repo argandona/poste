@@ -31,11 +31,35 @@ class ActividadViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Solo un Coordinador puede crear actividades.'}, status=403)
         return super().create(request, *args, **kwargs)
 
+    # Editar y borrar, igual que crear: las actividades son de todas las
+    # empresas.
+    def update(self, request, *args, **kwargs):
+        if not _solo_coordinador(request):
+            raise PermissionDenied('Solo un Coordinador puede cambiar actividades.')
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if not _solo_coordinador(request):
+            raise PermissionDenied('Solo un Coordinador puede borrar actividades.')
+        return super().destroy(request, *args, **kwargs)
+
 
 class ManoDeObraViewSet(viewsets.ModelViewSet):
+    """Las partidas con su precio, una lista para todas las empresas. Verlas
+    puede cualquiera con sesión; crear y editar, solo el SuperAdmin. No se
+    borran: las liquidaciones las nombran."""
     serializer_class   = ManoDeObraSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class   = CatalogoPagination
+    http_method_names  = ['get', 'post', 'put', 'patch', 'head', 'options']
+
+    def create(self, request, *args, **kwargs):
+        solo_superadmin(request, 'Solo el SuperAdmin cambia las partidas y sus precios.')
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        solo_superadmin(request, 'Solo el SuperAdmin cambia las partidas y sus precios.')
+        return super().update(request, *args, **kwargs)
 
     def get_queryset(self):
         qs = ManoDeObra.objects.all().order_by('partida')
@@ -75,6 +99,16 @@ class TipoTrabajoViewSet(viewsets.ModelViewSet):
                 ActividadTipoTrabajo.objects.get_or_create(
                     tipo_trabajo=tt, actividad_id=actividad_id)
         return Response(TipoTrabajoSerializer(tt).data, status=201)
+
+    def update(self, request, *args, **kwargs):
+        if not _solo_coordinador(request):
+            raise PermissionDenied('Solo un Coordinador puede cambiar tipos de trabajo.')
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if not _solo_coordinador(request):
+            raise PermissionDenied('Solo un Coordinador puede borrar tipos de trabajo.')
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=['post'])
     def set_actividades(self, request, pk=None):
