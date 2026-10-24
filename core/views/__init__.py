@@ -10,4 +10,4 @@ from .liquidaciones import *  # noqa: F401,F403
 from .configuracion import *  # noqa: F401,F403
 from .epp import *  # noqa: F401,F403
 from .ipc import *  # noqa: F401,F403
-from .configuracion import _solo_coordinador  # noqa: F401
+from .configuracion import _solo_superadmin  # noqa: F401
