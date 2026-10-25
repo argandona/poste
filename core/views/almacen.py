@@ -4,10 +4,22 @@ from .comun import *  # noqa: F401,F403
 
 # ── Material ─────────────────────────────────────────────────────────────────
 class MaterialViewSet(viewsets.ModelViewSet):
+    """El catálogo de materiales, uno para todas las empresas. Verlo puede
+    cualquiera con sesión; crear y editar, solo el SuperAdmin. No se borran:
+    el stock, los pedidos y las liquidaciones los nombran."""
     serializer_class   = MaterialSerializer
     queryset           = Material.objects.all()
     permission_classes = [permissions.IsAuthenticated]
     pagination_class   = CatalogoPagination
+    http_method_names  = ['get', 'post', 'put', 'patch', 'head', 'options']
+
+    def create(self, request, *args, **kwargs):
+        solo_superadmin(request, 'Solo el SuperAdmin cambia el catálogo de materiales.')
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        solo_superadmin(request, 'Solo el SuperAdmin cambia el catálogo de materiales.')
+        return super().update(request, *args, **kwargs)
 
     def get_queryset(self):
         qs = super().get_queryset()
