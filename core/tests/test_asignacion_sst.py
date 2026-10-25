@@ -50,6 +50,32 @@ class AsignarSSTTests(BaseAPITestCase):
         self.assertTrue(SSTEncargado.objects.filter(
             sst=self.sst, usuario=self.capataz).exists())
 
+    # ── A quién se asigna ────────────────────────────────────────────────────
+
+    def test_no_se_asigna_a_un_capataz_desactivado(self):
+        self.capataz.activo = False
+        self.capataz.save()
+        self.auth(self.coordinador)
+        resp = self.client.post(
+            self.url_asignar, {"usuario": self.capataz.pk}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("desactivado", resp.data["detail"])
+        self.assertEqual(self.asignados_a_capataz(), 0)
+        resp = self.client.post("/api/ssts/asignar_manual/", {
+            "sst_codigo": "SST-0002", "numero_suministro": "P-1",
+            "usuario": self.capataz.pk}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(SST.objects.filter(codigo="SST-0002").exists())
+
+    def test_solo_se_asigna_a_capataz_o_encargado(self):
+        self.auth(self.coordinador)
+        for quien in (self.encargado, self.coordinador):  # almacén y coordinador
+            resp = self.client.post(
+                self.url_asignar, {"usuario": quien.pk}, format="json")
+            self.assertEqual(resp.status_code, 400, quien.email)
+        self.assertFalse(SSTSuministro.objects.filter(
+            sst=self.sst, asignado_a__isnull=False).exists())
+
     def test_el_capataz_no_puede_asignar(self):
         self.auth(self.capataz)
 
