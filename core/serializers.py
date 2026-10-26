@@ -5,6 +5,7 @@ from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 
 from .errores import ErrorNegocio
+from .partes import es_de_varios_dias, fecha_del_parte, revisar_parte, sst_del_punto
 from .models import (
     Empresa, Rol, Usuario, Camion, UsuarioCamion, SST,
     TraspasoCamion, DetalleTraspasoCamion,
@@ -623,7 +624,8 @@ class ActividadSerializer(serializers.ModelSerializer):
         model  = Actividad
         # `varios_postes` lo necesita la app: con él decide si muestra el
         # botón de agregar un punto de trabajo a la SST.
-        fields = ['id_actividad', 'nombre', 'varios_postes', 'de_encargado']
+        fields = ['id_actividad', 'nombre', 'varios_postes', 'de_encargado',
+                  'varios_dias']
 
 
 class TipoTrabajoSerializer(serializers.ModelSerializer):
@@ -667,7 +669,7 @@ class SuministroRecuperoSerializer(serializers.ModelSerializer):
     class Meta:
         model  = SuministroRecupero
         fields = ['id_suministro_recupero', 'suministro', 'recupero',
-                  'matricula', 'descripcion', 'cantidad', 'fecha']
+                  'matricula', 'descripcion', 'cantidad', 'fecha', 'usuario']
 
 
 # ── Liquidacion Suministro ───────────────────────────────────────────────────
@@ -706,7 +708,8 @@ class LiquidacionSuministroSerializer(serializers.ModelSerializer):
             'suministro', 'numero_suministro',
             'suministro_externo', 'sst_externo',
             'usuario', 'usuario_nombre', 'tipo_trabajo', 'tipo_trabajo_nombre',
-            'fecha', 'observacion', 'partidas', 'materiales', 'medidas',
+            'fecha', 'fecha_parte', 'observacion', 'partidas', 'materiales',
+            'medidas',
         ]
 
 
@@ -811,7 +814,8 @@ class CorreccionLiquidacionSerializer(serializers.ModelSerializer):
         ]
 
 
-def partidas_de_sst_ocupadas(sst_codigo, suministro=None, suministro_externo=''):
+def partidas_de_sst_ocupadas(sst_codigo, suministro=None, suministro_externo='',
+                             fecha_parte=None, usuario=None):
     """Las partidas de ámbito SST ya liquidadas en OTRO poste de esa SST.
 
     Devuelve {codigo de partida: número del poste que la tiene}. Es lo que
@@ -819,7 +823,9 @@ def partidas_de_sst_ocupadas(sst_codigo, suministro=None, suministro_externo='')
     que su vereda, su arrastre y sus cables se liquidan una sola vez.
 
     El poste que se está liquidando se excluye: volver a grabarlo es
-    corregirlo, no duplicarlo."""
+    corregirlo, no duplicarlo. En una obra de varios días (con
+    [fecha_parte]) se excluye solo el parte que se corrige, el de ese día y
+    ese [usuario]: lo que se cobró otro día en el mismo poste ya está cobrado."""
     from .models import LiquidacionSuministro, ManoDeObra, SSTSuministro
 
     if not sst_codigo:
@@ -835,11 +841,15 @@ def partidas_de_sst_ocupadas(sst_codigo, suministro=None, suministro_externo='')
                      .filter(filtro)
                      .select_related('suministro')
                      .prefetch_related('partidas__mano_de_obra'))
+    mismo_poste = None
     if suministro is not None:
-        liquidaciones = liquidaciones.exclude(suministro=suministro)
-    if suministro_externo:
-        liquidaciones = liquidaciones.exclude(
-            suministro_externo=suministro_externo)
+        mismo_poste = models.Q(suministro=suministro)
+    elif suministro_externo:
+        mismo_poste = models.Q(suministro_externo=suministro_externo)
+    if mismo_poste is not None:
+        if fecha_parte is not None:
+            mismo_poste &= models.Q(fecha_parte=fecha_parte, usuario=usuario)
+        liquidaciones = liquidaciones.exclude(mismo_poste)
 
     ocupadas = {}
     for liq in liquidaciones:
@@ -874,6 +884,8 @@ class LiquidacionSuministroCreateSerializer(serializers.Serializer):
     motivo              = serializers.CharField(required=False, allow_blank=True, default='')
     # id del suministro en Render (para reflejar el estado/observación allá)
     suministro_render_id = serializers.IntegerField(required=False, allow_null=True)
+    # El día que reporta, en las obras de varios días. Sin ella, hoy.
+    fecha_parte          = serializers.DateField(required=False, allow_null=True)
 
     def validate(self, data):
         if not data.get('suministro') and not data.get('suministro_externo'):
@@ -939,6 +951,15 @@ class LiquidacionSuministroCreateSerializer(serializers.Serializer):
         suministro_externo = validated_data.get('suministro_externo', '')
         sst_externo        = validated_data.get('sst_externo', '')
         es_devuelto        = estado == 'DEVUELTO'
+        # En una obra de varios días esto es el parte de un día: se suma a los
+        # demás y solo reemplaza el de ese día, ese capataz y ese punto.
+        sst = sst_del_punto(suministro_local, sst_externo)
+        varios_dias = es_de_varios_dias(sst)
+        fecha_parte = None
+        if varios_dias:
+            fecha_parte = fecha_del_parte(validated_data.get('fecha_parte'))
+            revisar_parte(self._quien_corrige(), sst, usuario)
+        validated_data['fecha_parte'] = fecha_parte
         with transaction.atomic():
             # Reemplazo: si este poste ya se liquidó con este tipo de trabajo,
             # se borra la anterior (re-liquidar = corregir, no acumular). No
@@ -954,10 +975,13 @@ class LiquidacionSuministroCreateSerializer(serializers.Serializer):
                                    sst_externo=sst_externo)
             else:
                 prev = prev.none()
+            if varios_dias:
+                prev = prev.filter(fecha_parte=fecha_parte, usuario=usuario)
             # Lo que sale del plano se cobra una vez por SST. Si otro poste
             # ya lo liquidó, aquí se corta antes de tocar stock.
             ocupadas = partidas_de_sst_ocupadas(
-                sst_externo, suministro_local, suministro_externo)
+                sst_externo, suministro_local, suministro_externo,
+                fecha_parte=fecha_parte, usuario=usuario)
             for p in partidas_data:
                 mo = p['mano_de_obra']
                 if (mo.ambito == ManoDeObra.AMBITO_SST and p['cantidad'] > 0
@@ -1027,8 +1051,15 @@ class LiquidacionSuministroCreateSerializer(serializers.Serializer):
                         anterior=retrato,
                         cambios=_redactar_cambios(retrato, ahora),
                     )
+            # La fecha de ejecución de una obra de varios días es la de su
+            # primer parte. El punto sigue pendiente hasta que el coordinador
+            # termine la obra: mañana el capataz vuelve a reportar en él.
+            if varios_dias and (sst.fecha_ejecucion is None
+                                or fecha_parte < sst.fecha_ejecucion):
+                sst.fecha_ejecucion = fecha_parte
+                sst.save(update_fields=['fecha_ejecucion'])
             # Reflejar el estado en el suministro local (si lo hay)
-            if suministro_local:
+            if suministro_local and (es_devuelto or not varios_dias):
                 suministro_local.estado = 'devuelto' if es_devuelto else 'ejecutado'
                 suministro_local.save(update_fields=['estado'])
             # Reflejar estado/observación en Render (si la app mandó el id de Render).

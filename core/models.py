@@ -118,6 +118,12 @@ class Usuario(models.Model):
     def puede_ver_consolidado_de_todos(self): return self._tiene(Rol.LIQUIDADOR, Rol.COORDINADOR,
                                                                  Rol.SUPERADMIN)
     def puede_ver_informe_camiones(self): return self._tiene(Rol.SUPERADMIN, Rol.COORDINADOR)
+    # Obras de varios días: el coordinador las da por terminadas (o las
+    # reabre); el coordinador y el liquidador corrigen el parte de cualquiera,
+    # también con la obra ya terminada.
+    def puede_terminar_obra(self): return self._tiene(Rol.COORDINADOR, Rol.SUPERADMIN)
+    def puede_corregir_partes(self): return self._tiene(Rol.COORDINADOR, Rol.LIQUIDADOR,
+                                                        Rol.SUPERADMIN)
 
     def clean(self):
         if self.rol_secundario_id and self.rol_secundario_id == self.rol_id:
@@ -281,6 +287,11 @@ class Actividad(models.Model):
     # capataz solo las demás: no se cruzan al liquidar. Quien asigna o revisa
     # (coordinador, liquidador, almacén, administración) ve todas.
     de_encargado = models.BooleanField(default=False)
+    # Obra de varios días: cada capataz manda un parte por día y por punto, y
+    # la liquidación es la suma de todos. Volver a grabar corrige solo el
+    # parte de ese día, de ese capataz y en ese punto; los demás se quedan. La
+    # obra se cierra cuando el coordinador la da por terminada.
+    varios_dias = models.BooleanField(default=False)
     class Meta:
         db_table = "actividad"
     def __str__(self):
@@ -326,6 +337,12 @@ class SST(models.Model):
     # La hora sale en el cuaderno de obra junto con la fecha de ejecución.
     hora_ejecucion  = models.TimeField(null=True, blank=True)
     monto_sst     = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    # Solo en las obras de varios días: cuándo y quién (el coordinador) la dio
+    # por terminada. Desde ahí el capataz ya no manda ni corrige partes.
+    obra_terminada_el  = models.DateTimeField(null=True, blank=True)
+    obra_terminada_por = models.ForeignKey("Usuario", on_delete=models.PROTECT,
+                                           related_name="obras_terminadas",
+                                           null=True, blank=True)
     class Meta:
         db_table = "sst"
     def __str__(self):
@@ -889,6 +906,9 @@ class LiquidacionSuministro(models.Model):
     # los paños de vereda, pista y asfalto con su largo y ancho, o los metros
     # y viajes del acarreo. La app lo devuelve al reabrir la liquidación.
     medidas             = models.JSONField(default=dict, blank=True)
+    # El día que reporta, en las obras de varios días (el parte diario). En
+    # las demás actividades queda vacío.
+    fecha_parte         = models.DateField(null=True, blank=True, db_index=True)
     class Meta:
         db_table = "liquidacion_suministro"
     def __str__(self):
@@ -925,6 +945,11 @@ class SuministroRecupero(models.Model):
     recupero    = models.ForeignKey(Recupero,   on_delete=models.PROTECT, related_name="suministros")
     cantidad    = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
     fecha       = models.DateField()
+    # Quién lo reportó. Hace falta en las obras de varios días, donde cada
+    # capataz manda el recupero de su parte y corregirlo no toca el de otro.
+    usuario     = models.ForeignKey(Usuario, on_delete=models.PROTECT,
+                                    related_name="recuperos_reportados",
+                                    null=True, blank=True)
     class Meta:
         db_table = "suministro_recupero"
     def __str__(self):
