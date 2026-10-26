@@ -3,6 +3,16 @@ from .comun import *  # noqa: F401,F403
 
 
 # ── SST ─────────────────────────────────────────────────────────────────────
+def puede_recibir_sst(usuario):
+    """Se le asigna obra a quien la ejecuta: un capataz o un encargado, y
+    activo."""
+    if not (usuario.roles & {Rol.CAPATAZ, Rol.ENCARGADO}):
+        raise ErrorNegocio('Solo se asigna a un capataz o a un encargado.')
+    if not usuario.activo:
+        raise ErrorNegocio(f'{usuario.nombre} está desactivado: no se le '
+                           'asignan SST.')
+
+
 class SSTViewSet(viewsets.ModelViewSet):
     serializer_class   = SSTSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -359,6 +369,7 @@ class SSTViewSet(viewsets.ModelViewSet):
             capataz = Usuario.objects.get(pk=usuario_id)
         except Usuario.DoesNotExist:
             return Response({'detail': 'Usuario no encontrado.'}, status=404)
+        puede_recibir_sst(capataz)
         if sst.actividad_id and not actividades_para(capataz).filter(
                 pk=sst.actividad_id).exists():
             return Response({'detail': f'La actividad de la SST no es para '
@@ -571,10 +582,7 @@ class SSTViewSet(viewsets.ModelViewSet):
             capataz = Usuario.objects.get(pk=usuario_id)
         except Usuario.DoesNotExist:
             return Response({'detail': 'Capataz no encontrado.'}, status=404)
-        # Se le asigna obra a quien la ejecuta: un capataz o un encargado.
-        if not (capataz.roles & {Rol.CAPATAZ, Rol.ENCARGADO}):
-            return Response({'detail': 'Solo se asigna a un capataz o a un '
-                                       'encargado.'}, status=400)
+        puede_recibir_sst(capataz)
         if actividad_id and not actividades_para(capataz).filter(
                 pk=actividad_id).exists():
             return Response({'detail': f'Esa actividad no es para '
