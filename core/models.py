@@ -1051,6 +1051,72 @@ class PlanoSST(models.Model):
         return f"Plano SST {self.sst_codigo} ({len(self.elementos)} elementos)"
 
 
+class PlanoProyecto(models.Model):
+    """El plano proyectado (DXF) de una obra de varios días.
+
+    Lo sube el coordinador. Se guarda el DXF tal cual, comprimido, porque de
+    él sale el replanteo; y el dibujo ya simplificado, para no volver a leer
+    el DXF cada vez que la app lo muestra (ver core/plano_proyecto.py)."""
+    id_plano_proyecto = models.AutoField(primary_key=True)
+    empresa        = models.ForeignKey(Empresa, on_delete=models.PROTECT, related_name="planos_proyecto")
+    sst_codigo     = models.CharField(max_length=20, db_index=True)
+    nombre_archivo = models.CharField(max_length=200)
+    archivo        = models.BinaryField()   # el DXF comprimido con zlib
+    dibujo         = models.JSONField(default=dict)
+    subido_por     = models.ForeignKey("Usuario", on_delete=models.PROTECT, related_name="planos_proyecto")
+    fecha          = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        db_table = "plano_proyecto"
+        unique_together = (("empresa", "sst_codigo"),)
+    def __str__(self):
+        return f"Plano proyectado SST {self.sst_codigo}"
+
+
+class TrabajoPlano(models.Model):
+    """Un trabajo del proyecto: un texto del plano que dice lo que hay que
+    hacer ("3-1x120 N2XY PROY.", "INSTALAR 02 TUBOS ... (82.00m)",
+    "EMPALMAR ..."). Se identifica por el handle del texto en el DXF, que es
+    el que el replanteo reescribe."""
+    TIPOS = [("cable", "Cable"), ("tubo", "Tubo"), ("empalme", "Empalme")]
+    id_trabajo   = models.AutoField(primary_key=True)
+    plano        = models.ForeignKey(PlanoProyecto, on_delete=models.CASCADE, related_name="trabajos")
+    handle       = models.CharField(max_length=20)
+    texto        = models.TextField()
+    tipo         = models.CharField(max_length=10, choices=TIPOS)
+    unidad       = models.CharField(max_length=5)
+    # Los metros que dice el proyecto, si los dice. Los planos son sin
+    # escala: no se miden del dibujo.
+    proyectado   = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    # Tubos que van en paralelo ("02 TUBOS"): el replanteo da el total.
+    cantidad     = models.PositiveSmallIntegerField(default=1)
+    x            = models.FloatField(default=0)
+    y            = models.FloatField(default=0)
+    # El coordinador descarta lo que no es obra: el mismo cable repetido en
+    # los cortes, por ejemplo.
+    activo       = models.BooleanField(default=True)
+    class Meta:
+        db_table = "trabajo_plano"
+        ordering = ["id_trabajo"]
+        unique_together = (("plano", "handle"),)
+    def __str__(self):
+        return self.texto[:60]
+
+
+class AvanceTrabajo(models.Model):
+    """Lo que un capataz hizo de un trabajo en el parte de un día: metros
+    (de cada tubo, como los cuenta el plano) o unidades."""
+    id_avance   = models.AutoField(primary_key=True)
+    trabajo     = models.ForeignKey(TrabajoPlano, on_delete=models.PROTECT, related_name="avances")
+    usuario     = models.ForeignKey("Usuario", on_delete=models.PROTECT, related_name="avances_plano")
+    fecha_parte = models.DateField()
+    cantidad    = models.DecimalField(max_digits=10, decimal_places=2,
+                                      validators=[MinValueValidator(0)])
+    fecha       = models.DateTimeField(auto_now=True)
+    class Meta:
+        db_table = "avance_trabajo"
+        unique_together = (("trabajo", "usuario", "fecha_parte"),)
+
+
 class AsignacionAgregado(models.Model):
     """Bolsas de un agregado (el cemento) que salen del almacén al camión sin
     pasar por un pedido.
