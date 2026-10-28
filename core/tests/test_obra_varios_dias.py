@@ -302,19 +302,106 @@ class ObraVariosDiasTests(EscenarioObra):
 
 
 class PartidaDeSstEnVariosDiasTests(EscenarioObra):
-    """Lo que se cobra una vez por SST no se vuelve a cobrar otro día en el
-    mismo punto."""
+    """Lo que en las demás actividades se cobra una vez por SST, en una obra
+    de varios días se suma: el plano crece día a día y cada parte cobra lo
+    nuevo (lo resta la app)."""
 
     def setUp(self):
         super().setUp()
         self.partida.ambito = ManoDeObra.AMBITO_SST
         self.partida.save()
 
-    def test_otro_dia_en_el_mismo_punto_no_la_vuelve_a_cobrar(self):
+    def test_otro_dia_suma_lo_suyo(self):
         self.parte(self.capataz, 1, fecha=AYER)
-        self.parte(self.capataz, 1, esperado=400)
+        self.parte(self.capataz, 2)
+        self.assertEqual(self.total(), 3)
+
+    def test_otro_capataz_el_mismo_dia_tambien(self):
+        self.parte(self.capataz, 1)
+        self.parte(self.capataz2, 2)
+        self.assertEqual(self.total(), 3)
+
+    def test_no_se_muestra_bloqueada(self):
+        self.parte(self.capataz, 1, fecha=AYER)
+        self.auth(self.capataz)
+        r = self.client.get('/api/liquidaciones/partidas_de_sst/',
+                            {'sst': self.sst.codigo,
+                             'suministro': self.punto.pk})
+        self.assertEqual(r.data, {})
 
     def test_corregir_el_mismo_parte_si_se_puede(self):
         self.parte(self.capataz, 1)
         self.parte(self.capataz, 1)
         self.assertEqual(self.total(), 1)
+
+    def test_cada_parte_dice_lo_que_cobro(self):
+        self.parte(self.capataz, 1, fecha=AYER)
+        self.parte(self.capataz2, 2)
+        self.auth(self.coordinador)
+        r = self.client.get('/api/liquidaciones/partes/',
+                            {'sst': self.sst.codigo})
+        self.assertEqual(
+            [(p['usuario_nombre'], p['partidas']) for p in r.data['partes']],
+            [('Capataz Dos', {'*777001': '2.00'}),
+             ('Capataz Uno', {'*777001': '1.00'})])
+
+    def test_cada_parte_dice_el_material_que_consumio(self):
+        self.parte(self.capataz, 1, material=3)
+        self.auth(self.coordinador)
+        r = self.client.get('/api/liquidaciones/partes/',
+                            {'sst': self.sst.codigo})
+        self.assertEqual(r.data['partes'][0]['materiales'],
+                         {self.material_a.matricula: '3.00'})
+
+
+class TiposDeCalidadDeProductoTests(EscenarioObra):
+    """Las partidas que pasó el usuario el 2026-10-27, en sus dos tipos."""
+
+    def partidas_de(self, nombre):
+        tipo = TipoTrabajo.objects.get(nombre=nombre)
+        return list(tipo.partidas.order_by('orden')
+                    .values_list('mano_de_obra__partida', flat=True))
+
+    def test_los_dos_tipos_cuelgan_de_la_actividad(self):
+        nombres = set(ActividadTipoTrabajo.objects
+                      .filter(actividad=self.actividad)
+                      .values_list('tipo_trabajo__nombre', flat=True))
+        self.assertTrue({'Trabajos subterraneos', 'Trabajos civiles'} <= nombres)
+
+    def test_subterraneos_y_civiles_llevan_lo_suyo(self):
+        self.assertEqual(self.partidas_de('Trabajos subterraneos'), [
+            '*090248', '*091420', '*091440', '*091450', '*091633', '*091642',
+            '*091676', '*091775', '*091914', '*091935', '*095210', '*099090'])
+        self.assertEqual(self.partidas_de('Trabajos civiles'), [
+            '*091800', '*091810', '*091820', '*091830', '*091845', '*095227',
+            '*095265', '*095275', '*095280', '*095282'])
+
+    def test_el_material_va_en_subterraneos(self):
+        tipo = TipoTrabajo.objects.get(nombre='Trabajos subterraneos')
+        matriculas = list(tipo.materiales.values_list(
+            'material__matricula', flat=True))
+        self.assertEqual(len(matriculas), 33)
+        self.assertIn('5031179', matriculas)
+        civiles = TipoTrabajo.objects.get(nombre='Trabajos civiles')
+        self.assertEqual(civiles.materiales.count(), 0)
+
+    def test_el_material_que_ya_existia_no_se_toca(self):
+        from ..models import Material
+        Material.objects.filter(matricula='5411070').update(
+            precio='12.50', descripcion='CONECTOR CUÑA 70/16')
+        call_command('configurar_calidad_producto', stdout=StringIO())
+        cuna = Material.objects.get(matricula='5411070')
+        self.assertEqual((str(cuna.precio), cuna.descripcion),
+                         ('12.50', 'CONECTOR CUÑA 70/16'))
+
+    def test_las_nuevas_nacen_con_el_precio_de_la_lista(self):
+        self.assertEqual(
+            str(ManoDeObra.objects.get(partida='*095282').precio), '19.23')
+
+    def test_las_que_ya_existian_no_se_tocan(self):
+        ManoDeObra.objects.filter(partida='*091810').update(
+            precio='80.51', descripcion='REPOSICION DE GRASS M2')
+        call_command('configurar_calidad_producto', stdout=StringIO())
+        grass = ManoDeObra.objects.get(partida='*091810')
+        self.assertEqual(str(grass.precio), '80.51')
+        self.assertEqual(grass.descripcion, 'REPOSICION DE GRASS M2')

@@ -823,12 +823,18 @@ def partidas_de_sst_ocupadas(sst_codigo, suministro=None, suministro_externo='',
     que su vereda, su arrastre y sus cables se liquidan una sola vez.
 
     El poste que se está liquidando se excluye: volver a grabarlo es
-    corregirlo, no duplicarlo. En una obra de varios días (con
-    [fecha_parte]) se excluye solo el parte que se corrige, el de ese día y
-    ese [usuario]: lo que se cobró otro día en el mismo poste ya está cobrado."""
+    corregirlo, no duplicarlo.
+
+    Una obra de varios días no bloquea nada: su plano crece día a día y cada
+    parte cobra lo que el plano tiene de más sobre lo que ya cobraron los
+    otros partes (lo calcula la app). Bloquearlo dejaría la vereda del
+    segundo día sin cobrar."""
     from .models import LiquidacionSuministro, ManoDeObra, SSTSuministro
+    from .partes import es_de_varios_dias, sst_del_punto
 
     if not sst_codigo:
+        return {}
+    if es_de_varios_dias(sst_del_punto(sst_codigo=sst_codigo)):
         return {}
     postes = list(SSTSuministro.objects
                   .filter(models.Q(sst__codigo=sst_codigo) |
@@ -847,8 +853,6 @@ def partidas_de_sst_ocupadas(sst_codigo, suministro=None, suministro_externo='',
     elif suministro_externo:
         mismo_poste = models.Q(suministro_externo=suministro_externo)
     if mismo_poste is not None:
-        if fecha_parte is not None:
-            mismo_poste &= models.Q(fecha_parte=fecha_parte, usuario=usuario)
         liquidaciones = liquidaciones.exclude(mismo_poste)
 
     ocupadas = {}

@@ -378,7 +378,11 @@ def _llenar_traslado_acarreo(ws, elementos_plano):
 
 def _llenar_veredas(ws, elementos_plano):
     """Los paños del plano. Devuelve cuántas filas ocupó."""
-    panos = [e for e in elementos_plano if e.get('tipo') == 'vereda']
+    # Solo la vereda: en Calidad de producto el plano mide también piso,
+    # grass, asfalto, pista y afirmado, que no son vereda (el paño lo dice
+    # en 'pano'; sin él, es vereda).
+    panos = [e for e in elementos_plano if e.get('tipo') == 'vereda'
+             and (e.get('pano') or 'vereda') == 'vereda']
     escritas = 0
     for fila, pano in zip(range(VEREDA_PRIMERA, VEREDA_ULTIMA + 1), panos):
         ws[f'C{fila}'] = float(pano.get('largo') or 0)

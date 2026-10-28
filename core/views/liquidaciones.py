@@ -470,7 +470,8 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
                          .filter(models.Q(suministro__in=postes) |
                                  models.Q(sst_externo=sst.codigo or sst.sst))
                          .select_related('usuario', 'suministro', 'tipo_trabajo')
-                         .prefetch_related('partidas__mano_de_obra')
+                         .prefetch_related('partidas__mano_de_obra',
+                                           'materiales_consumidos__material')
                          .order_by('-fecha_parte', 'usuario__nombre',
                                    'id_liquidacion'))
         partes, total = {}, {}
@@ -485,12 +486,26 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
                                       if liq.suministro_id
                                       else liq.suministro_externo),
                 'tipos': [],
+                # Lo que cobró este parte. La app lo resta del plano para
+                # que el parte de hoy cobre solo lo nuevo.
+                'partidas': {},
+                # Igual con el material: el cable del plano se descuenta del
+                # camión una sola vez.
+                'materiales': {},
             })
             parte['tipos'].append(liq.tipo_trabajo.nombre)
+            for consumo in liq.materiales_consumidos.all():
+                matricula = consumo.material.matricula
+                parte['materiales'][matricula] = str(
+                    Decimal(parte['materiales'].get(matricula, '0'))
+                    + consumo.cantidad)
             for lp in liq.partidas.all():
                 if lp.cantidad <= 0:
                     continue
                 mo = lp.mano_de_obra
+                parte['partidas'][mo.partida] = str(
+                    Decimal(parte['partidas'].get(mo.partida, '0'))
+                    + lp.cantidad)
                 fila = total.setdefault(mo.partida, {
                     'partida': mo.partida, 'descripcion': mo.descripcion,
                     'precio': mo.precio, 'cantidad': Decimal('0')})
