@@ -58,6 +58,9 @@ class SSTViewSet(viewsets.ModelViewSet):
             'sst_codigo':    sst.codigo or sst.sst or '',
             'actividad':     sst.actividad.nombre if sst.actividad_id else '',
             'varios_postes': bool(sst.actividad_id and sst.actividad.varios_postes),
+            # Obra de varios días: se liquida por parte diario.
+            'varios_dias':   bool(sst.actividad_id and sst.actividad.varios_dias),
+            'obra_terminada': sst.obra_terminada_el is not None,
             'puntos': [
                 {
                     'id_suministro':     rel.suministro.id_suministro,
@@ -69,6 +72,68 @@ class SSTViewSet(viewsets.ModelViewSet):
                 for rel in relaciones
             ],
         })
+
+    def _obra(self, request):
+        """La obra de varios días que pide el cuerpo, si quien pide puede
+        terminarla o reabrirla."""
+        from ..partes import es_de_varios_dias
+
+        actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
+        if not (actor and actor.puede_terminar_obra()):
+            raise PermissionDenied('Solo el coordinador termina o reabre una obra.')
+        codigo = (request.data.get('sst_codigo') or '').strip()
+        if not codigo:
+            raise ErrorNegocio('sst_codigo es obligatorio.')
+        sst = (qs_empresa(SST.objects.select_related('actividad'), request)
+               .filter(models.Q(codigo=codigo) | models.Q(sst=codigo))
+               .first())
+        if sst is None:
+            raise ErrorNegocio(f'No existe la SST {codigo}.')
+        if not es_de_varios_dias(sst):
+            raise ErrorNegocio(f'La SST {codigo} no es una obra de varios días.')
+        return actor, sst
+
+    @action(detail=False, methods=['post'])
+    def terminar_obra(self, request):
+        """POST /api/ssts/terminar_obra/  { sst_codigo }
+
+        El coordinador da por terminada una obra de varios días. Sus puntos
+        dejan de estar pendientes y los capataces ya no mandan partes."""
+        actor, sst = self._obra(request)
+        if sst.obra_terminada_el is not None:
+            raise ErrorNegocio('La obra ya estaba terminada.')
+        postes = Suministro.objects.filter(sst_suministros__sst=sst)
+        if not LiquidacionSuministro.objects.filter(suministro__in=postes).exists():
+            raise ErrorNegocio('La obra no tiene ningún parte: no hay nada '
+                               'que terminar.')
+        with transaction.atomic():
+            sst.obra_terminada_el = timezone.now()
+            sst.obra_terminada_por = actor
+            sst.save(update_fields=['obra_terminada_el', 'obra_terminada_por'])
+            postes.filter(estado='asignado').update(estado='ejecutado')
+        return Response({'status': 'ok', 'sst_codigo': sst.codigo or sst.sst,
+                         'terminada': True})
+
+    @action(detail=False, methods=['post'])
+    def reabrir_obra(self, request):
+        """POST /api/ssts/reabrir_obra/  { sst_codigo }
+
+        Deshace terminar_obra: los puntos vuelven a estar pendientes y los
+        capataces pueden mandar y corregir sus partes."""
+        _actor, sst = self._obra(request)
+        if sst.obra_terminada_el is None:
+            raise ErrorNegocio('La obra no está terminada.')
+        with transaction.atomic():
+            sst.obra_terminada_el = None
+            sst.obra_terminada_por = None
+            sst.save(update_fields=['obra_terminada_el', 'obra_terminada_por'])
+            # En una obra de varios días un punto solo pasa a ejecutado al
+            # terminarla, así que todos los ejecutados vuelven atrás.
+            (Suministro.objects.filter(sst_suministros__sst=sst,
+                                       estado='ejecutado')
+             .update(estado='asignado'))
+        return Response({'status': 'ok', 'sst_codigo': sst.codigo or sst.sst,
+                         'terminada': False})
 
     @action(detail=False, methods=['post'])
     def agregar_punto(self, request):

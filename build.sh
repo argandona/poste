@@ -26,6 +26,8 @@ python manage.py configurar_aereo_viento
 python manage.py configurar_partidas_de_sst
 # Reforzamiento de poste: las dos actividades de los encargados.
 python manage.py configurar_reforzamiento
+# Calidad de producto: obra de varios días, con parte diario.
+python manage.py configurar_calidad_producto
 # Roles de la cuadrilla y el catálogo inicial de EPP.
 python manage.py configurar_epp
 # El rol Chofer: kilometraje y combustible de los camiones.

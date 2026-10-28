@@ -10,4 +10,5 @@ from .liquidaciones import *  # noqa: F401,F403
 from .configuracion import *  # noqa: F401,F403
 from .epp import *  # noqa: F401,F403
 from .ipc import *  # noqa: F401,F403
+from .planos_proyecto import *  # noqa: F401,F403
 from .configuracion import _solo_superadmin  # noqa: F401

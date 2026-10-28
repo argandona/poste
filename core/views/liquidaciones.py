@@ -237,6 +237,13 @@ class RecuperoViewSet(viewsets.ModelViewSet):
             qs = qs.filter(suministro_id=suministro_id)
         else:
             qs = qs.none()
+        # En una obra de varios días, el recupero de un parte.
+        fecha = request.query_params.get('fecha')
+        if fecha:
+            qs = qs.filter(fecha=fecha)
+        usuario = request.query_params.get('usuario')
+        if usuario:
+            qs = qs.filter(usuario_id=usuario)
         return Response(SuministroRecuperoSerializer(qs, many=True).data)
 
     @action(detail=False, methods=['get'])
@@ -328,25 +335,42 @@ class RecuperoViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def registrar(self, request):
-        """POST /api/recuperos/registrar/ { suministro, fecha?, items:[{recupero,cantidad}] }
-        Reemplaza los recuperos del suministro por los enviados."""
-        import datetime as _dt
+        """POST /api/recuperos/registrar/ { suministro, fecha?, usuario?, items:[{recupero,cantidad}] }
+        Reemplaza los recuperos del suministro por los enviados.
+
+        En una obra de varios días reemplaza solo los del parte: los de ese
+        día (`fecha`) y ese capataz (`usuario`, por defecto quien graba)."""
+        from ..partes import (es_de_varios_dias, fecha_del_parte,
+                              revisar_parte, sst_del_punto)
+
         suministro_id = request.data.get('suministro')
         items = request.data.get('items', [])
-        fecha = request.data.get('fecha') or str(_dt.date.today())
         if not suministro_id:
             return Response({'detail': 'suministro requerido.'}, status=400)
         sum_obj = Suministro.objects.filter(pk=suministro_id).first()
         if sum_obj is None:
             return Response({'detail': 'Suministro no encontrado.'}, status=404)
+        fecha = fecha_del_parte(request.data.get('fecha'))
+        actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
+        usuario = actor
+        if request.data.get('usuario'):
+            usuario = Usuario.objects.filter(pk=request.data['usuario']).first()
+            if usuario is None:
+                raise ErrorNegocio('Usuario no encontrado.')
+        sst = sst_del_punto(sum_obj)
+        reemplaza = SuministroRecupero.objects.filter(suministro=sum_obj)
+        if es_de_varios_dias(sst):
+            revisar_parte(actor, sst, usuario)
+            reemplaza = reemplaza.filter(fecha=fecha, usuario=usuario)
         with transaction.atomic():
-            SuministroRecupero.objects.filter(suministro=sum_obj).delete()
+            reemplaza.delete()
             for it in items:
                 cant = it.get('cantidad')
                 rec = it.get('recupero')
                 if rec and cant and float(cant) > 0:
                     SuministroRecupero.objects.create(
-                        suministro=sum_obj, recupero_id=rec, cantidad=cant, fecha=fecha)
+                        suministro=sum_obj, recupero_id=rec, cantidad=cant,
+                        fecha=fecha, usuario=usuario)
         n = SuministroRecupero.objects.filter(suministro=sum_obj).count()
         return Response({'status': 'ok', 'recuperos': n})
 
@@ -376,6 +400,14 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
         sst = self.request.query_params.get('sst')
         if sst:
             qs = qs.filter(sst_externo=sst)
+        # El parte de un día en una obra de varios días: el de ese día y ese
+        # capataz es lo que la app vuelve a mostrar para corregirlo.
+        fecha_parte = self.request.query_params.get('fecha_parte')
+        if fecha_parte:
+            qs = qs.filter(fecha_parte=fecha_parte)
+        usuario = self.request.query_params.get('usuario')
+        if usuario:
+            qs = qs.filter(usuario_id=usuario)
         return qs
 
     def create(self, request, *args, **kwargs):
@@ -404,7 +436,98 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
         if id_suministro:
             suministro = Suministro.objects.filter(pk=id_suministro).first()
         externo = (request.query_params.get('suministro_externo') or '').strip()
-        return Response(partidas_de_sst_ocupadas(codigo, suministro, externo))
+        # En una obra de varios días se excluye solo el parte que se corrige.
+        fecha_parte = request.query_params.get('fecha_parte') or None
+        usuario = request.query_params.get('usuario') or None
+        return Response(partidas_de_sst_ocupadas(
+            codigo, suministro, externo, fecha_parte=fecha_parte,
+            usuario=usuario))
+
+    @action(detail=False, methods=['get'])
+    def partes(self, request):
+        """GET /api/liquidaciones/partes/?sst=<codigo>
+
+        Los partes diarios de una obra de varios días: quién reportó qué día
+        y en qué punto, y la suma de todo, que es la liquidación. También dice
+        si la obra está terminada y qué puede hacer quien pregunta."""
+        from ..partes import es_de_varios_dias
+
+        codigo = (request.query_params.get('sst') or '').strip()
+        if not codigo:
+            raise ErrorNegocio('Se requiere el código de la SST.')
+        sst = (qs_empresa(SST.objects.select_related(
+                   'actividad', 'obra_terminada_por'), request)
+               .filter(models.Q(codigo=codigo) | models.Q(sst=codigo))
+               .first())
+        if sst is None:
+            raise ErrorNegocio(f'No existe la SST {codigo}.')
+        if not es_de_varios_dias(sst):
+            raise ErrorNegocio(f'La SST {codigo} no es una obra de varios días.')
+        actor = Usuario.objects.filter(pk=request.user.id_usuario).first()
+
+        postes = Suministro.objects.filter(sst_suministros__sst=sst)
+        liquidaciones = (LiquidacionSuministro.objects
+                         .filter(models.Q(suministro__in=postes) |
+                                 models.Q(sst_externo=sst.codigo or sst.sst))
+                         .select_related('usuario', 'suministro', 'tipo_trabajo')
+                         .prefetch_related('partidas__mano_de_obra',
+                                           'materiales_consumidos__material')
+                         .order_by('-fecha_parte', 'usuario__nombre',
+                                   'id_liquidacion'))
+        partes, total = {}, {}
+        for liq in liquidaciones:
+            clave = (liq.fecha_parte, liq.usuario_id, liq.suministro_id)
+            parte = partes.setdefault(clave, {
+                'fecha': str(liq.fecha_parte) if liq.fecha_parte else '',
+                'usuario': liq.usuario_id,
+                'usuario_nombre': liq.usuario.nombre,
+                'suministro': liq.suministro_id,
+                'numero_suministro': (liq.suministro.numero_suministro
+                                      if liq.suministro_id
+                                      else liq.suministro_externo),
+                'tipos': [],
+                # Lo que cobró este parte. La app lo resta del plano para
+                # que el parte de hoy cobre solo lo nuevo.
+                'partidas': {},
+                # Igual con el material: el cable del plano se descuenta del
+                # camión una sola vez.
+                'materiales': {},
+            })
+            parte['tipos'].append(liq.tipo_trabajo.nombre)
+            for consumo in liq.materiales_consumidos.all():
+                matricula = consumo.material.matricula
+                parte['materiales'][matricula] = str(
+                    Decimal(parte['materiales'].get(matricula, '0'))
+                    + consumo.cantidad)
+            for lp in liq.partidas.all():
+                if lp.cantidad <= 0:
+                    continue
+                mo = lp.mano_de_obra
+                parte['partidas'][mo.partida] = str(
+                    Decimal(parte['partidas'].get(mo.partida, '0'))
+                    + lp.cantidad)
+                fila = total.setdefault(mo.partida, {
+                    'partida': mo.partida, 'descripcion': mo.descripcion,
+                    'precio': mo.precio, 'cantidad': Decimal('0')})
+                fila['cantidad'] += lp.cantidad
+        filas = []
+        for f in sorted(total.values(), key=lambda f: f['partida']):
+            filas.append({**f, 'precio': str(f['precio']),
+                          'cantidad': str(f['cantidad']),
+                          'monto': str(f['cantidad'] * f['precio'])})
+        terminada = sst.obra_terminada_el is not None
+        return Response({
+            'sst': sst.codigo or sst.sst,
+            'actividad': sst.actividad.nombre,
+            'terminada': terminada,
+            'terminada_el': sst.obra_terminada_el,
+            'terminada_por': (sst.obra_terminada_por.nombre
+                              if sst.obra_terminada_por_id else ''),
+            'puede_terminar': bool(actor and actor.puede_terminar_obra()),
+            'corrige_todos': bool(actor and actor.puede_corregir_partes()),
+            'partes': list(partes.values()),
+            'total': filas,
+        })
 
     @action(detail=False, methods=['get'])
     def correcciones(self, request):
@@ -599,8 +722,12 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
         # mostrar tal como se guardaron.
         fecha_por_sst = {}
         hora_por_sst = {}
-        for sst in SST.objects.all():
+        # Las obras de varios días: la app entra por sus partes, no por poste.
+        obra_por_sst = {}
+        for sst in SST.objects.select_related('actividad'):
             clave = sst.codigo or sst.sst
+            if clave and sst.actividad_id and sst.actividad.varios_dias:
+                obra_por_sst[clave] = sst.obra_terminada_el is not None
             if clave:
                 fecha_por_sst[clave] = str(sst.fecha_ejecucion) if sst.fecha_ejecucion else ''
                 hora_por_sst[clave] = (sst.hora_ejecucion.strftime('%H:%M')
@@ -667,7 +794,9 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
                     {'id_liquidacion': liq.pk,
                      'tipo_trabajo': liq.tipo_trabajo_id,
                      'tipo_trabajo_nombre': liq.tipo_trabajo.nombre,
-                     'usuario': liq.usuario_id}
+                     'usuario': liq.usuario_id,
+                     'fecha_parte': (str(liq.fecha_parte)
+                                     if liq.fecha_parte else '')}
                     for liq in g['liquidaciones']
                 ],
             })
@@ -699,6 +828,8 @@ class LiquidacionViewSet(viewsets.ModelViewSet):
                 'fecha': fecha_por_sst.get(sst_cod, ''),
                 'hora': hora_por_sst.get(sst_cod, ''),
                 'cambios_poste': str(agg['cambios']),
+                'varios_dias': sst_cod in obra_por_sst,
+                'obra_terminada': obra_por_sst.get(sst_cod, False),
                 'total': str(total), 'partidas': items,
                 'postes': sorted(agg['postes'], key=lambda p: p['suministro']),
             })

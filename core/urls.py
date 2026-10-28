@@ -12,6 +12,7 @@ from .views import (
     UploadConsumoViewSet, InventarioViewSet,
     SuministroViewSet, LiquidacionViewSet,
     PlanoSSTViewSet,
+    PlanoProyectoViewSet,
     ActividadViewSet, TipoTrabajoViewSet, ManoDeObraViewSet,
     RecuperoViewSet, AsignacionAgregadoViewSet,
     EPPViewSet, IngresoEPPViewSet, PedidoEPPViewSet, IPCViewSet,
@@ -44,6 +45,7 @@ router.register(r'inventarios',          InventarioViewSet,            basename=
 router.register(r'suministros',          SuministroViewSet,            basename='suministro')
 router.register(r'liquidaciones',        LiquidacionViewSet,           basename='liquidacion')
 router.register(r'planos',               PlanoSSTViewSet,              basename='plano')
+router.register(r'planos-proyecto',      PlanoProyectoViewSet,         basename='plano-proyecto')
 router.register(r'actividades',          ActividadViewSet,             basename='actividad')
 router.register(r'tipos-trabajo',        TipoTrabajoViewSet,           basename='tipo-trabajo')
 router.register(r'mano-de-obra',         ManoDeObraViewSet,            basename='mano-de-obra')

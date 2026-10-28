@@ -131,7 +131,12 @@ def ssts_ya_liquidadas(usuario, sst_ids=None):
     pendientes = set(qs.filter(suministro__estado='asignado',
                                suministro__liquidaciones__isnull=True)
                      .values_list('sst_id', flat=True))
-    return con_postes - pendientes
+    # Una obra de varios días sigue hasta que el coordinador la termina: cada
+    # día lleva su IPC aunque ya tenga partes.
+    abiertas = set(qs.filter(sst__actividad__varios_dias=True,
+                             sst__obra_terminada_el__isnull=True)
+                   .values_list('sst_id', flat=True))
+    return con_postes - pendientes - abiertas
 
 
 def usuario_consultado(request, puede_ver_otros):

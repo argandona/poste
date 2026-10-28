@@ -118,6 +118,12 @@ class Usuario(models.Model):
     def puede_ver_consolidado_de_todos(self): return self._tiene(Rol.LIQUIDADOR, Rol.COORDINADOR,
                                                                  Rol.SUPERADMIN)
     def puede_ver_informe_camiones(self): return self._tiene(Rol.SUPERADMIN, Rol.COORDINADOR)
+    # Obras de varios días: el coordinador las da por terminadas (o las
+    # reabre); el coordinador y el liquidador corrigen el parte de cualquiera,
+    # también con la obra ya terminada.
+    def puede_terminar_obra(self): return self._tiene(Rol.COORDINADOR, Rol.SUPERADMIN)
+    def puede_corregir_partes(self): return self._tiene(Rol.COORDINADOR, Rol.LIQUIDADOR,
+                                                        Rol.SUPERADMIN)
 
     def clean(self):
         if self.rol_secundario_id and self.rol_secundario_id == self.rol_id:
@@ -281,6 +287,11 @@ class Actividad(models.Model):
     # capataz solo las demás: no se cruzan al liquidar. Quien asigna o revisa
     # (coordinador, liquidador, almacén, administración) ve todas.
     de_encargado = models.BooleanField(default=False)
+    # Obra de varios días: cada capataz manda un parte por día y por punto, y
+    # la liquidación es la suma de todos. Volver a grabar corrige solo el
+    # parte de ese día, de ese capataz y en ese punto; los demás se quedan. La
+    # obra se cierra cuando el coordinador la da por terminada.
+    varios_dias = models.BooleanField(default=False)
     class Meta:
         db_table = "actividad"
     def __str__(self):
@@ -326,6 +337,12 @@ class SST(models.Model):
     # La hora sale en el cuaderno de obra junto con la fecha de ejecución.
     hora_ejecucion  = models.TimeField(null=True, blank=True)
     monto_sst     = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    # Solo en las obras de varios días: cuándo y quién (el coordinador) la dio
+    # por terminada. Desde ahí el capataz ya no manda ni corrige partes.
+    obra_terminada_el  = models.DateTimeField(null=True, blank=True)
+    obra_terminada_por = models.ForeignKey("Usuario", on_delete=models.PROTECT,
+                                           related_name="obras_terminadas",
+                                           null=True, blank=True)
     class Meta:
         db_table = "sst"
     def __str__(self):
@@ -889,6 +906,9 @@ class LiquidacionSuministro(models.Model):
     # los paños de vereda, pista y asfalto con su largo y ancho, o los metros
     # y viajes del acarreo. La app lo devuelve al reabrir la liquidación.
     medidas             = models.JSONField(default=dict, blank=True)
+    # El día que reporta, en las obras de varios días (el parte diario). En
+    # las demás actividades queda vacío.
+    fecha_parte         = models.DateField(null=True, blank=True, db_index=True)
     class Meta:
         db_table = "liquidacion_suministro"
     def __str__(self):
@@ -925,6 +945,11 @@ class SuministroRecupero(models.Model):
     recupero    = models.ForeignKey(Recupero,   on_delete=models.PROTECT, related_name="suministros")
     cantidad    = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
     fecha       = models.DateField()
+    # Quién lo reportó. Hace falta en las obras de varios días, donde cada
+    # capataz manda el recupero de su parte y corregirlo no toca el de otro.
+    usuario     = models.ForeignKey(Usuario, on_delete=models.PROTECT,
+                                    related_name="recuperos_reportados",
+                                    null=True, blank=True)
     class Meta:
         db_table = "suministro_recupero"
     def __str__(self):
@@ -1024,6 +1049,72 @@ class PlanoSST(models.Model):
         unique_together = (("empresa", "sst_codigo"),)
     def __str__(self):
         return f"Plano SST {self.sst_codigo} ({len(self.elementos)} elementos)"
+
+
+class PlanoProyecto(models.Model):
+    """El plano proyectado (DXF) de una obra de varios días.
+
+    Lo sube el coordinador. Se guarda el DXF tal cual, comprimido, porque de
+    él sale el replanteo; y el dibujo ya simplificado, para no volver a leer
+    el DXF cada vez que la app lo muestra (ver core/plano_proyecto.py)."""
+    id_plano_proyecto = models.AutoField(primary_key=True)
+    empresa        = models.ForeignKey(Empresa, on_delete=models.PROTECT, related_name="planos_proyecto")
+    sst_codigo     = models.CharField(max_length=20, db_index=True)
+    nombre_archivo = models.CharField(max_length=200)
+    archivo        = models.BinaryField()   # el DXF comprimido con zlib
+    dibujo         = models.JSONField(default=dict)
+    subido_por     = models.ForeignKey("Usuario", on_delete=models.PROTECT, related_name="planos_proyecto")
+    fecha          = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        db_table = "plano_proyecto"
+        unique_together = (("empresa", "sst_codigo"),)
+    def __str__(self):
+        return f"Plano proyectado SST {self.sst_codigo}"
+
+
+class TrabajoPlano(models.Model):
+    """Un trabajo del proyecto: un texto del plano que dice lo que hay que
+    hacer ("3-1x120 N2XY PROY.", "INSTALAR 02 TUBOS ... (82.00m)",
+    "EMPALMAR ..."). Se identifica por el handle del texto en el DXF, que es
+    el que el replanteo reescribe."""
+    TIPOS = [("cable", "Cable"), ("tubo", "Tubo"), ("empalme", "Empalme")]
+    id_trabajo   = models.AutoField(primary_key=True)
+    plano        = models.ForeignKey(PlanoProyecto, on_delete=models.CASCADE, related_name="trabajos")
+    handle       = models.CharField(max_length=20)
+    texto        = models.TextField()
+    tipo         = models.CharField(max_length=10, choices=TIPOS)
+    unidad       = models.CharField(max_length=5)
+    # Los metros que dice el proyecto, si los dice. Los planos son sin
+    # escala: no se miden del dibujo.
+    proyectado   = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    # Tubos que van en paralelo ("02 TUBOS"): el replanteo da el total.
+    cantidad     = models.PositiveSmallIntegerField(default=1)
+    x            = models.FloatField(default=0)
+    y            = models.FloatField(default=0)
+    # El coordinador descarta lo que no es obra: el mismo cable repetido en
+    # los cortes, por ejemplo.
+    activo       = models.BooleanField(default=True)
+    class Meta:
+        db_table = "trabajo_plano"
+        ordering = ["id_trabajo"]
+        unique_together = (("plano", "handle"),)
+    def __str__(self):
+        return self.texto[:60]
+
+
+class AvanceTrabajo(models.Model):
+    """Lo que un capataz hizo de un trabajo en el parte de un día: metros
+    (de cada tubo, como los cuenta el plano) o unidades."""
+    id_avance   = models.AutoField(primary_key=True)
+    trabajo     = models.ForeignKey(TrabajoPlano, on_delete=models.PROTECT, related_name="avances")
+    usuario     = models.ForeignKey("Usuario", on_delete=models.PROTECT, related_name="avances_plano")
+    fecha_parte = models.DateField()
+    cantidad    = models.DecimalField(max_digits=10, decimal_places=2,
+                                      validators=[MinValueValidator(0)])
+    fecha       = models.DateTimeField(auto_now=True)
+    class Meta:
+        db_table = "avance_trabajo"
+        unique_together = (("trabajo", "usuario", "fecha_parte"),)
 
 
 class AsignacionAgregado(models.Model):
