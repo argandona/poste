@@ -1414,6 +1414,10 @@ class JornadaCamion(models.Model):
     foto_cierre  = models.CharField(max_length=255, blank=True)
     hora_cierre  = models.DateTimeField(null=True, blank=True)
     observacion  = models.TextField(blank=True)
+    # Avisos del cierre (core/avisos_camiones.py): cuándo se le pidió al
+    # chofer que cierre, y cuándo dijo que se queda hasta más tarde.
+    aviso_cierre   = models.DateTimeField(null=True, blank=True)
+    se_queda_tarde = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "jornada_camion"
@@ -1425,6 +1429,19 @@ class JornadaCamion(models.Model):
 
     def __str__(self):
         return f"{self.camion} | {self.fecha} | {self.chofer}"
+
+
+class AvisoSinSalida(models.Model):
+    """El aviso de la mañana al coordinador ya se mandó ese día a esa
+    empresa: los camiones que no salieron y las salidas sin cerrar."""
+    id_aviso_sin_salida = models.AutoField(primary_key=True)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name="avisos_sin_salida")
+    fecha   = models.DateField()
+    enviado = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "aviso_sin_salida"
+        unique_together = ("empresa", "fecha")
 
 
 class JornadaSST(models.Model):

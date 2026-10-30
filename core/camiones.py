@@ -143,6 +143,7 @@ def datos_jornada(j):
         'distritos': distritos_de(j),
         'personas': j.personas,
         'observacion': j.observacion,
+        'se_queda_tarde': j.se_queda_tarde,
         'ssts': [{'id_sst': x.sst_id, 'sst': _sst_texto(x.sst), 'distrito': x.sst.distrito,
                   'actividad': x.sst.actividad.nombre if x.sst.actividad_id else ''}
                  for x in j.ssts.all()],
@@ -799,6 +800,16 @@ class JornadaCamionViewSet(viewsets.ViewSet):
         j.hora_cierre = timezone.now()
         j.observacion = (request.data.get('observacion') or '').strip()
         j.save(update_fields=['km_cierre', 'foto_cierre', 'hora_cierre', 'observacion'])
+        return Response(datos_jornada(_jornadas_con_todo(JornadaCamion.objects).get(pk=j.pk)))
+
+    @action(detail=True, methods=['post'])
+    def me_quedo(self, request, pk=None):
+        """POST /api/jornadas-camion/{id}/me_quedo/ — el chofer avisa que se
+        queda hasta más tarde: ese día ya no se le pide cerrar."""
+        _, j = self._abierta_propia(request, pk)
+        if j.se_queda_tarde is None:
+            j.se_queda_tarde = timezone.now()
+            j.save(update_fields=['se_queda_tarde'])
         return Response(datos_jornada(_jornadas_con_todo(JornadaCamion.objects).get(pk=j.pk)))
 
     @action(detail=True, methods=['post'])
