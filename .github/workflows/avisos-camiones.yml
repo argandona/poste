@@ -1,0 +1,25 @@
+# El reloj de los avisos de camiones (core/avisos_camiones.py): cada media
+# hora le pide al backend que mande los que toquen. El backend decide por la
+# hora de Lima, así que llamarlo de más no hace nada.
+#
+# Necesita el secreto AVISOS_CAMIONES_TOKEN en el repositorio, con el mismo
+# valor que la variable AVISOS_CAMIONES_TOKEN del servicio en Render.
+name: Avisos de camiones
+
+on:
+  schedule:
+    - cron: '5,35 * * * *'
+  workflow_dispatch:
+
+jobs:
+  revisar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Pedir los avisos al backend
+        env:
+          TOKEN: ${{ secrets.AVISOS_CAMIONES_TOKEN }}
+        run: |
+          curl --fail-with-body -sS --retry 3 --retry-delay 20 -X POST \
+            -H "X-Avisos-Token: $TOKEN" \
+            https://tecsur-backend.onrender.com/api/avisos-camiones/

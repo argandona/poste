@@ -17,6 +17,7 @@ from .views import (
     RecuperoViewSet, AsignacionAgregadoViewSet,
     EPPViewSet, IngresoEPPViewSet, PedidoEPPViewSet, IPCViewSet,
 )
+from .avisos_camiones import AvisosCamionesView
 from .camiones import CargaCombustibleViewSet, JornadaCamionViewSet
 from .conduccion import ConduccionViewSet
 from .version_app import VersionAppViewSet
@@ -63,5 +64,6 @@ router.register(r'version-app',          VersionAppViewSet,           basename='
 urlpatterns = [
     path('auth/login/',   LoginView.as_view(),   name='login'),
     path('auth/refresh/', RefreshView.as_view(),  name='refresh'),
+    path('avisos-camiones/', AvisosCamionesView.as_view(), name='avisos-camiones'),
     path('',              include(router.urls)),
 ]
