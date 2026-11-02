@@ -41,7 +41,10 @@ def send_notification(tokens, title, body, data=None):
         return
     try:
         from firebase_admin import messaging
-        clean = [t for t in tokens if t]
+        # Un mismo celular puede estar en dos destinatarios (alguien que es
+        # SuperAdmin y coordinador, o dos cuentas en el mismo celular): un
+        # solo aviso por celular.
+        clean = list(dict.fromkeys(t for t in tokens if t))
         if not clean:
             return
         msg = messaging.MulticastMessage(

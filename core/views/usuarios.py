@@ -88,6 +88,10 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         token = request.data.get('token')
         if not token:
             return Response({'detail': 'token requerido'}, status=400)
+        # El celular es de quien entró último: la cuenta que estaba antes en
+        # ese celular deja de recibir sus avisos ahí.
+        Usuario.objects.filter(fcm_token=token).exclude(
+            pk=request.user.id_usuario).update(fcm_token=None)
         Usuario.objects.filter(pk=request.user.id_usuario).update(fcm_token=token)
         return Response({'status': 'ok'})
 
