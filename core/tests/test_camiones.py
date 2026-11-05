@@ -227,13 +227,92 @@ class CamionesTests(BaseAPITestCase):
         r = self.client.get(f'{J}informe/', {'anio': hoy.year, 'mes': hoy.month,
                                              'formato': 'xlsx'})
         libro = openpyxl.load_workbook(io.BytesIO(r.content))
-        self.assertEqual(libro.sheetnames, ['Resumen', 'Salidas', 'Combustible', 'Eliminados',
-                                            'F09-PA-SMAC-007'])
+        self.assertEqual(libro.sheetnames, [
+            'Resumen', 'Ranking', 'Choferes', 'Grifos', 'Revisar', 'Costo por SST',
+            'Costo por distrito', 'Uso de flota', 'Tendencia', 'Salidas', 'Combustible',
+            'Eliminados', 'F09-PA-SMAC-007'])
         self.assertEqual(libro['Resumen']['A4'].value, 'ABC-123')
         salidas = libro['Salidas']
         col = [c.value for c in salidas[3]].index('Distrito') + 1
         self.assertEqual(sorted(salidas.cell(row=f, column=col).value for f in (4, 5)),
                          ['Ate', 'Surco'])
+
+    def test_hojas_de_analisis_del_excel(self):
+        """Dos camiones diésel y dos choferes. ABC-123: Carlos hace dos tramos de
+        25 km/gal en Primax y Otro Chofer uno de 10 km/gal en Repsol, más caro.
+        XYZ-999: un tramo de 30 km/gal."""
+        from ..models import Camion
+        def como(usuario, url, **datos):
+            self.auth(usuario)
+            with mock.patch('core.fcm.send_notification'):
+                return self.client.post(url, datos, format='json')
+
+        jid = self.salir(1000).json()['id_jornada']
+        for km in (1000, 1250, 1500):
+            self.cargar(km, grifo=' primax ')
+        self.cerrar(jid, 1500)
+        jid = como(self.chofer2, J, camion=self.camion.pk, km=1500, foto=FOTO,
+                   ssts=[self.sst.pk]).json()['id_jornada']
+        como(self.chofer2, C, km=1600, cantidad='10', monto='250', tanque_lleno=True,
+             foto=FOTO, grifo='Repsol')
+        como(self.chofer2, f'{J}{jid}/cerrar/', km=1600, foto=FOTO)
+
+        otro = Camion.objects.create(empresa=self.empresa, placa='XYZ-999', combustible='diesel')
+        jid = self.salir(2000, camion=otro.pk, ssts=[], trabajo_interno='Almacén',
+                         distrito_interno='Ate').json()['id_jornada']
+        self.cargar(2000, grifo='Primax')
+        self.cargar(2300, grifo='Primax')
+        self.cerrar(jid, 2300)
+
+        hoy = timezone.localdate()
+        self.auth(self.coordinador)
+        r = self.client.get(f'{J}informe/', {'anio': hoy.year, 'mes': hoy.month,
+                                             'formato': 'xlsx'})
+        libro = openpyxl.load_workbook(io.BytesIO(r.content))
+
+        def tabla(nombre):
+            ws = libro[nombre]
+            enc = [c.value for c in ws[3]]
+            return [dict(zip(enc, (c.value for c in fila)))
+                    for fila in ws.iter_rows(min_row=4) if fila[0].value is not None]
+
+        ranking = tabla('Ranking')
+        self.assertEqual([(f['Placa'], f['Puesto'], f['Rendimiento'], f['Comentario'])
+                          for f in ranking],
+                         [('XYZ-999', 1, 30.0, 'Rinde más'), ('ABC-123', 2, 20.0, 'Rinde menos')])
+        self.assertEqual((ranking[0]['S/ por km'], ranking[0]['Puesto S/ por km']), (1.2, 1))
+        self.assertTrue(libro['Ranking']._charts)
+
+        choferes = {f['Chofer']: f for f in tabla('Choferes')}
+        # ABC-123 promedia 20 (25, 25 y 10): Carlos 125, Otro Chofer 50.
+        self.assertEqual(choferes['Carlos Chofer']['Índice de rendimiento'], 125.0)
+        self.assertEqual(choferes['Otro Chofer']['Índice de rendimiento'], 50.0)
+        self.assertEqual((choferes['Carlos Chofer']['Salidas'],
+                          choferes['Carlos Chofer']['Km manejados']), (2, 800))
+
+        grifos = tabla('Grifos')
+        self.assertEqual([(f['Grifo'], f['S/ por unidad (promedio)'], f['S/ pagado de más'])
+                          for f in grifos], [('PRIMAX', 18.0, 0.0), ('REPSOL', 25.0, 70.0)])
+
+        revisar = [(f['Placa'], f['Qué'], f['Detalle']) for f in tabla('Revisar')]
+        self.assertIn(('ABC-123', 'Rendimiento bajo',
+                       '10.0 km/gal entre el km 1500 y el 1600; su promedio es 25.0 (60 % menos)'),
+                      revisar)
+        self.assertTrue(any(q == 'Carga' and 'S/ 25.00 por gal' in d for _, q, d in revisar))
+
+        sst = {f['SST o trabajo']: f for f in tabla('Costo por SST')}
+        self.assertEqual((sst['SST-1']['Km'], sst['SST-1']['S/ estimado']), (600.0, 790.0))
+        self.assertEqual(sst['Trabajo interno: Almacén']['S/ estimado'], 360.0)
+        distritos = {f['Distrito']: f['S/ estimado'] for f in tabla('Costo por distrito')}
+        self.assertEqual(distritos, {'SURCO': 790.0, 'ATE': 360.0})
+
+        uso = {f['Placa']: f for f in tabla('Uso de flota')}
+        self.assertEqual(uso['ABC-123']['Salidas'], 2)
+
+        ws = libro['Tendencia']
+        self.assertEqual(ws['A6'].value, 'ABC-123')
+        self.assertEqual(ws.cell(row=6, column=13).value, 20.0)
+        self.assertEqual(len(ws._charts), 3)
 
     def test_personas_por_defecto_y_cambiadas(self):
         jid = self.salir().json()['id_jornada']

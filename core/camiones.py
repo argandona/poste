@@ -204,12 +204,12 @@ def _avisar(empresa_id, titulo, cuerpo, data):
 
 # ── Rendimiento ──────────────────────────────────────────────────────────────
 
-def tramos_llenos(camion, combustible, hasta_km=None):
-    """Rendimiento entre cada par de cargas de tanque lleno seguidas, en orden
-    de km: [(carga que cierra el tramo, km/unidad)]."""
+def tramos_detalle(camion, combustible, hasta_km=None):
+    """Cada tramo entre dos cargas de tanque lleno seguidas, en orden de km:
+    km inicial y final, lo cargado, el rendimiento y la carga que lo cierra."""
     cargas = list(CargaCombustible.objects
                   .filter(camion=camion, combustible=combustible)
-                  .order_by('km', 'fecha_hora'))
+                  .select_related('chofer').order_by('km', 'fecha_hora'))
     if hasta_km is not None:
         cargas = [c for c in cargas if c.km <= hasta_km]
     tramos, anterior, suma = [], None, Decimal(0)
@@ -218,9 +218,18 @@ def tramos_llenos(camion, combustible, hasta_km=None):
             suma += c.cantidad
         if c.tanque_lleno:
             if anterior is not None and suma > 0 and c.km > anterior.km:
-                tramos.append((c, Decimal(c.km - anterior.km) / suma))
+                tramos.append({'desde_km': anterior.km, 'hasta_km': c.km,
+                               'cantidad': suma, 'carga': c,
+                               'rendimiento': Decimal(c.km - anterior.km) / suma})
             anterior, suma = c, Decimal(0)
     return tramos
+
+
+def tramos_llenos(camion, combustible, hasta_km=None):
+    """Rendimiento entre cada par de cargas de tanque lleno seguidas, en orden
+    de km: [(carga que cierra el tramo, km/unidad)]."""
+    return [(t['carga'], t['rendimiento'])
+            for t in tramos_detalle(camion, combustible, hasta_km)]
 
 
 def revisar_alerta(carga):
@@ -484,6 +493,9 @@ def informe_excel(informe, contratista='', responsable=''):
         if c['alerta']:
             for celda in fila:
                 celda.fill = rojo
+
+    from .camiones_analisis import hojas_de_analisis
+    hojas_de_analisis(wb, informe, hoja, n)
 
     hora = lambda d: timezone.localtime(d).strftime('%H:%M') if d else ''
     hoja(wb.create_sheet('Salidas'),
