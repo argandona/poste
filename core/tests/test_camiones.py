@@ -293,7 +293,7 @@ class CamionesTests(BaseAPITestCase):
         self.assertIn(('ABC-123', 'Rendimiento bajo',
                        '10.0 km/gal entre el km 1500 y el 1600; su promedio es 25.0 (60 % menos)'),
                       revisar)
-        self.assertTrue(any(q == 'Carga' and 'S/ 25.00 por gal' in d for _, q, d in revisar))
+        self.assertFalse(any('mediana' in d for _, _, d in revisar))
 
         uso = {f['Placa']: f for f in tabla('Uso de flota')}
         self.assertEqual(uso['ABC-123']['Salidas'], 2)

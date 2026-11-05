@@ -11,7 +11,6 @@ cierre): no pide datos nuevos.
 from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
-from statistics import median
 
 from django.utils import timezone
 
@@ -21,11 +20,6 @@ from .camiones import (
 )
 from .models import Camion, JornadaCamion
 
-# Una carga cuyo precio por unidad se aparta más que esto de la mediana del mes
-# (mismo combustible) se marca para revisar.
-DESVIO_PRECIO = Decimal('0.15')
-# Hacen falta al menos estas cargas de un combustible para tener mediana.
-CARGAS_PARA_MEDIANA = 3
 # Una carga a menos de estos km de la anterior del mismo camión.
 KM_CARGA_SEGUIDA = 30
 # Km sin registrar entre un cierre y la salida siguiente que vale la pena mirar.
@@ -183,7 +177,6 @@ def por_chofer(informe, hoy=None):
 def a_revisar(informe, hoy=None):
     """Lo raro del mes, para que alguien lo mire: no acusa a nadie.
 
-    - Carga con un precio por unidad muy distinto al de las demás del mes.
     - Carga a pocos km de la anterior, o segunda carga del día.
     - Tramo de tanque lleno que rindió menos del 85 % de los 5 anteriores.
     - Km que el camión hizo sin salida registrada (entre un cierre y la salida
@@ -192,13 +185,6 @@ def a_revisar(informe, hoy=None):
     """
     hoy = hoy or timezone.localdate()
     desde, hasta = informe['desde'], informe['hasta']
-    precios = defaultdict(list)
-    for c in informe['camiones']:
-        for k in c['cargas']:
-            precios[k['combustible']].append(k['precio_unitario'])
-    medianas = {comb: median(v) for comb, v in precios.items()
-                if len(v) >= CARGAS_PARA_MEDIANA}
-
     filas = []
     for c in informe['camiones']:
         previa, por_dia = None, defaultdict(int)
@@ -206,10 +192,6 @@ def a_revisar(informe, hoy=None):
             dia = _fecha(k['fecha_hora'])
             por_dia[dia] += 1
             motivos = []
-            m = medianas.get(k['combustible'])
-            if m and abs(k['precio_unitario'] - m) > m * DESVIO_PRECIO:
-                motivos.append(f"Pagó S/ {k['precio_unitario']:.2f} por {k['unidad']}; "
-                               f"la mediana del mes es S/ {m:.2f}")
             if previa is not None and k['km'] - previa['km'] < KM_CARGA_SEGUIDA:
                 motivos.append(f"Solo {k['km'] - previa['km']} km desde la carga anterior")
             if por_dia[dia] > 1:
