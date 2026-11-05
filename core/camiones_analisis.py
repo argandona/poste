@@ -436,9 +436,6 @@ def hojas_de_analisis(wb, informe, hoja, n, hoy=None):
                           ('soles', 'S/ de combustible'),
                           ('km', 'Km recorridos')):
         ws.cell(row=fila, column=1, value=nombre).font = Font(bold=True)
-        ws.cell(row=fila + 1, column=1, value=TENDENCIA[nombre]).font = Font(
-            italic=True, size=8, color='595959')
-        fila += 1
         fila += 1
         for col, texto in enumerate(['Placa'] + etiquetas, 1):
             celda = ws.cell(row=fila, column=col, value=texto)
@@ -480,7 +477,8 @@ def hojas_de_analisis(wb, informe, hoja, n, hoy=None):
 
 # ── Notas de los encabezados ─────────────────────────────────────────────────
 # Pedido del usuario el 2026-11-05: que cada columna explique qué es. Van como
-# nota de Excel (el triangulito rojo; se lee al pasar el mouse).
+# nota de Excel (el triangulito rojo; se lee al pasar el mouse). Una fila escrita
+# debajo del encabezado se probó y el usuario pidió quitarla: solo la nota.
 
 EXPLICACIONES = {
     'Resumen': {
@@ -574,37 +572,6 @@ TENDENCIA = {
     'S/ de combustible': 'Soles pagados en combustible cada mes.',
     'Km recorridos': 'Km del mes (salidas + km sin registrar).',
 }
-
-
-# Ancho mínimo de una columna con explicación, para que la fila no quede muy alta.
-ANCHO_EXPLICADA = 16
-
-
-def fila_de_explicaciones(ws, encabezados, anchos):
-    """Escribe en la fila 4, debajo del encabezado, lo que significa cada
-    columna. Se ve en cualquier visor (las notas de Excel no salen en el
-    celular). Devuelve los anchos de columna (las explicadas, más anchas) o
-    None si la hoja no tiene explicaciones."""
-    import math
-
-    from openpyxl.styles import Alignment, Font, PatternFill
-    textos = EXPLICACIONES.get(ws.title)
-    if not textos:
-        return None
-    anchos = [max(a, ANCHO_EXPLICADA, len(t) + 3) if t in textos else a
-              for t, a in zip(encabezados, anchos)] + list(anchos[len(encabezados):])
-    amarillo = PatternFill('solid', fgColor='FFF2CC')
-    lineas = 1
-    for col, (titulo, ancho) in enumerate(zip(encabezados, anchos), 1):
-        texto = textos.get(titulo, '')
-        celda = ws.cell(row=4, column=col, value=texto or None)
-        celda.font = Font(italic=True, size=8, color='595959')
-        celda.fill = amarillo
-        celda.alignment = Alignment(wrap_text=True, vertical='top')
-        if texto:
-            lineas = max(lineas, math.ceil(len(texto) / (ancho * 1.5)))
-    ws.row_dimensions[4].height = min(11.5 * lineas + 4, 120)
-    return anchos
 
 
 def explicar_encabezados(wb):
