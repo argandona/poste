@@ -230,10 +230,10 @@ class CamionesTests(BaseAPITestCase):
         self.assertEqual(libro.sheetnames, [
             'Resumen', 'Ranking', 'Choferes', 'Revisar', 'Uso de flota', 'Tendencia',
             'Salidas', 'Combustible', 'Eliminados', 'F09-PA-SMAC-007'])
-        self.assertEqual(libro['Resumen']['A4'].value, 'ABC-123')
+        self.assertEqual(libro['Resumen']['A5'].value, 'ABC-123')
         salidas = libro['Salidas']
         col = [c.value for c in salidas[3]].index('Distrito') + 1
-        self.assertEqual(sorted(salidas.cell(row=f, column=col).value for f in (4, 5)),
+        self.assertEqual(sorted(salidas.cell(row=f, column=col).value for f in (5, 6)),
                          ['Ate', 'Surco'])
 
     def test_hojas_de_analisis_del_excel(self):
@@ -273,7 +273,7 @@ class CamionesTests(BaseAPITestCase):
             ws = libro[nombre]
             enc = [c.value for c in ws[3]]
             return [dict(zip(enc, (c.value for c in fila)))
-                    for fila in ws.iter_rows(min_row=4) if fila[0].value is not None]
+                    for fila in ws.iter_rows(min_row=5) if fila[0].value is not None]
 
         ranking = tabla('Ranking')
         self.assertEqual([(f['Placa'], f['Puesto'], f['Rendimiento'], f['Comentario'])
@@ -298,9 +298,19 @@ class CamionesTests(BaseAPITestCase):
         uso = {f['Placa']: f for f in tabla('Uso de flota')}
         self.assertEqual(uso['ABC-123']['Salidas'], 2)
 
+        # Cada encabezado explicado lleva su nota de Excel.
+        notas = {c.value: c.comment for c in libro['Uso de flota'][3]}
+        self.assertIn('días hábiles × 100', notas['% de uso'].text)
+        self.assertIsNotNone({c.value: c.comment for c in libro['Resumen'][3]}['Km sin registrar'])
+        # Y la misma explicación se ve escrita debajo del encabezado.
+        visibles = dict(zip((c.value for c in libro['Uso de flota'][3]),
+                            (c.value for c in libro['Uso de flota'][4])))
+        self.assertEqual(visibles['% de uso'], 'Con salida ÷ días hábiles × 100.')
+        self.assertIsNone(visibles['Placa'])
+
         ws = libro['Tendencia']
-        self.assertEqual(ws['A6'].value, 'ABC-123')
-        self.assertEqual(ws.cell(row=6, column=13).value, 20.0)
+        self.assertEqual(ws['A7'].value, 'ABC-123')
+        self.assertEqual(ws.cell(row=7, column=13).value, 20.0)
         self.assertEqual(len(ws._charts), 3)
 
     def test_personas_por_defecto_y_cambiadas(self):

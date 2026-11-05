@@ -349,7 +349,7 @@ def hojas_de_analisis(wb, informe, hoja, n, hoy=None):
     # Ranking
     ws = wb.create_sheet('Ranking')
     filas = ranking(informe)
-    hoja(ws, ['Combustible', 'Puesto', 'Placa', 'Rendimiento', 'Unidad', 'vs. el mejor %',
+    d = hoja(ws, ['Combustible', 'Puesto', 'Placa', 'Rendimiento', 'Unidad', 'vs. el mejor %',
               'Método', 'Km del mes', 'S/ combustible', 'S/ por km', 'Puesto S/ por km',
               'Comentario'],
          [[f['combustible'], f['puesto'], f['placa'], n(f['rendimiento']), f'km/{f["unidad"]}',
@@ -358,18 +358,18 @@ def hojas_de_analisis(wb, informe, hoja, n, hoy=None):
          [12, 8, 11, 12, 9, 13, 12, 11, 14, 10, 15, 22])
     _nota(ws, 'Rendimiento: solo se compara entre camiones del mismo combustible. '
               'S/ por km: se compara entre todos (1 = el más barato).')
-    for i, f in enumerate(filas, 4):
+    for i, f in enumerate(filas, d):
         if f['comentario'] == 'Rinde más':
             pintar(ws, i, verde)
         elif f['comentario'] == 'Rinde menos':
             pintar(ws, i, rojo)
     fila_graf = 3
-    inicio = 4
+    inicio = d
     for comb in dict.fromkeys(f['combustible'] for f in filas):
-        grupo = [i for i, f in enumerate(filas, 4)
+        grupo = [i for i, f in enumerate(filas, d)
                  if f['combustible'] == comb and f['rendimiento'] is not None]
         if grupo:
-            unidad = filas[grupo[0] - 4]['unidad']
+            unidad = filas[grupo[0] - d]['unidad']
             alto = _grafico_barras(ws, f'Rendimiento {comb} (km/{unidad})', 3, 4,
                                    grupo[0], grupo[-1], f'N{fila_graf}')
             fila_graf += int(alto * 2) + 2
@@ -381,7 +381,7 @@ def hojas_de_analisis(wb, informe, hoja, n, hoy=None):
     # Choferes
     ws = wb.create_sheet('Choferes')
     filas = por_chofer(informe, hoy=hoy)
-    hoja(ws, ['Chofer', 'Salidas', 'Km manejados', 'Camiones', 'Horas en ruta',
+    d = hoja(ws, ['Chofer', 'Salidas', 'Km manejados', 'Camiones', 'Horas en ruta',
               'Km por salida', 'Horas por salida', 'Cargas', 'S/ cargado',
               'Salidas sin cierre', 'Km en tramos medidos', 'Índice de rendimiento'],
          [[f['chofer'], f['salidas'], f['km'], f['camiones'], f['horas'],
@@ -391,10 +391,10 @@ def hojas_de_analisis(wb, informe, hoja, n, hoy=None):
     _nota(ws, 'Índice: 100 = el camión rindió igual que su promedio (este mes y los 3 '
               'anteriores); más es mejor. En un tramo de tanque lleno con varios choferes, '
               'a cada uno le toca según sus km.')
-    for i, f in enumerate(filas, 4):
+    for i, f in enumerate(filas, d):
         if f['indice'] is not None and f['indice'] < UMBRAL_ALERTA * 100:
             pintar(ws, i, rojo)
-    medidos = [i for i, f in enumerate(filas, 4) if f['indice'] is not None]
+    medidos = [i for i, f in enumerate(filas, d) if f['indice'] is not None]
     if medidos:
         _grafico_barras(ws, 'Índice de rendimiento por chofer (100 = normal)', 1, 12,
                         medidos[0], medidos[-1], 'N3')
@@ -402,17 +402,17 @@ def hojas_de_analisis(wb, informe, hoja, n, hoy=None):
     # Revisar
     ws = wb.create_sheet('Revisar')
     filas = a_revisar(informe, hoy=hoy)
-    hoja(ws, ['Placa', 'Fecha', 'Hora', 'Chofer', 'Km', 'Qué', 'Detalle', 'Grifo'],
+    d = hoja(ws, ['Placa', 'Fecha', 'Hora', 'Chofer', 'Km', 'Qué', 'Detalle', 'Grifo'],
          filas, [11, 11, 7, 22, 10, 18, 80, 22])
     _nota(ws, 'Cosas raras del mes para mirar con la foto del tablero: no siempre son un '
               'error.' if filas else 'Nada raro este mes.')
-    for i in range(4, 4 + len(filas)):
+    for i in range(d, d + len(filas)):
         ws.cell(row=i, column=2).number_format = 'DD/MM/YYYY'
 
     # Uso de la flota
     ws = wb.create_sheet('Uso de flota')
     filas = uso_flota(informe, hoy=hoy)
-    hoja(ws, ['Placa', 'Días hábiles', 'Con salida', 'Sin salida', '% de uso',
+    d = hoja(ws, ['Placa', 'Días hábiles', 'Con salida', 'Sin salida', '% de uso',
               'Días de fin de semana', 'Salidas', 'Horas en ruta', 'Horas por salida',
               'Km por día con salida'],
          [[f['placa'], f['habiles'], f['habiles_con'], f['habiles_sin'], n(f['uso']),
@@ -421,7 +421,7 @@ def hojas_de_analisis(wb, informe, hoja, n, hoy=None):
          [11, 12, 11, 11, 10, 20, 8, 13, 15, 20])
     _nota(ws, 'Días hábiles: lunes a viernes del mes, hasta hoy si es el mes en curso.')
     if filas and any(f['uso'] is not None for f in filas):
-        _grafico_barras(ws, '% de días hábiles con salida', 1, 5, 4, 3 + len(filas), 'L3')
+        _grafico_barras(ws, '% de días hábiles con salida', 1, 5, d, d + len(filas) - 1, 'L3')
 
     # Tendencia
     ws = wb.create_sheet('Tendencia')
@@ -436,6 +436,9 @@ def hojas_de_analisis(wb, informe, hoja, n, hoy=None):
                           ('soles', 'S/ de combustible'),
                           ('km', 'Km recorridos')):
         ws.cell(row=fila, column=1, value=nombre).font = Font(bold=True)
+        ws.cell(row=fila + 1, column=1, value=TENDENCIA[nombre]).font = Font(
+            italic=True, size=8, color='595959')
+        fila += 1
         fila += 1
         for col, texto in enumerate(['Placa'] + etiquetas, 1):
             celda = ws.cell(row=fila, column=col, value=texto)
@@ -473,3 +476,154 @@ def hojas_de_analisis(wb, informe, hoja, n, hoy=None):
         ch.width, ch.height = 22, 9
         ws.add_chart(ch, f'{get_column_letter(len(etiquetas) + 3)}{ancla}')
         ancla += 20
+
+
+# ── Notas de los encabezados ─────────────────────────────────────────────────
+# Pedido del usuario el 2026-11-05: que cada columna explique qué es. Van como
+# nota de Excel (el triangulito rojo; se lee al pasar el mouse).
+
+EXPLICACIONES = {
+    'Resumen': {
+        'Responsables': 'Capataz o encargado a cargo del camión en las salidas del mes.',
+        'Choferes': 'Quiénes manejaron el camión este mes.',
+        'Días': 'Días distintos en que el camión tuvo al menos una salida.',
+        'Salidas': 'Cuántas veces el chofer marcó km de salida en el mes.',
+        'Km del mes': 'Km de las salidas + km sin registrar.',
+        'Km SST': 'Km de las salidas que fueron a una o más SST.',
+        'Km internos': 'Km de las salidas de trabajo interno (sin SST).',
+        'Km sin registrar': ('Km entre el cierre de una salida y la salida siguiente: el camión '
+                             'se movió sin que nadie lo registre, o el km se marcó mal.'),
+        'SST atendidas': 'SST distintas a las que fue el camión en el mes.',
+        'Km por SST': 'Km SST ÷ SST atendidas.',
+        'Cantidad': 'Combustible cargado en el mes (gal, L o m³ según el camión).',
+        'S/ combustible': 'Soles pagados en combustible en el mes.',
+        'Rendimiento (km/unidad)': 'Km que hace el camión con un galón (o L o m³).',
+        'Método': ('«tanque lleno»: exacto, entre la primera y la última carga de tanque '
+                   'lleno del mes. «aproximado»: no hubo dos llenos; km del mes ÷ cantidad.'),
+        'Promedio 3 meses': 'Rendimiento de los 3 meses anteriores.',
+        'Variación %': 'Rendimiento del mes contra el promedio de 3 meses. Negativo = rinde menos.',
+        'S/ por km': 'S/ combustible ÷ km del mes: cuánto cuesta cada km.',
+        'Sin cierre': 'Salidas de días anteriores a las que nadie marcó el km de cierre.',
+        'Alerta': 'SÍ cuando rinde menos del 85 % de su promedio de 3 meses (fila en rojo).',
+    },
+    'Ranking': {
+        'Puesto': ('Lugar dentro de los camiones del mismo combustible. 1 = el que más km '
+                   'hace por galón.'),
+        'Rendimiento': 'Km por galón (o L o m³) en el mes.',
+        'vs. el mejor %': 'Cuánto menos rinde que el primero de su combustible.',
+        'Método': '«tanque lleno»: exacto. «aproximado»: km del mes ÷ cantidad cargada.',
+        'Km del mes': 'Km de las salidas + km sin registrar.',
+        'S/ combustible': 'Soles pagados en combustible en el mes.',
+        'S/ por km': 'S/ combustible ÷ km del mes. Este sí se compara entre todos.',
+        'Puesto S/ por km': 'Lugar entre todos los camiones. 1 = el más barato por km.',
+        'Comentario': 'Rinde más / Rinde menos dentro de su combustible (verde / rojo).',
+    },
+    'Choferes': {
+        'Salidas': 'Salidas que hizo el chofer en el mes.',
+        'Km manejados': 'Km de sus salidas (km cierre − km salida).',
+        'Camiones': 'Camiones que manejó en el mes.',
+        'Horas en ruta': 'Suma de horas entre la salida y el cierre (solo salidas cerradas).',
+        'Km por salida': 'Km manejados ÷ salidas.',
+        'Horas por salida': ('Horas en ruta ÷ salidas cerradas. Si es muy alto, el cierre se '
+                             'marcó al día siguiente.'),
+        'Cargas': 'Cargas de combustible que registró.',
+        'S/ cargado': 'Soles de las cargas que registró.',
+        'Salidas sin cierre': 'Salidas suyas de días anteriores que no cerró.',
+        'Km en tramos medidos': ('Km suyos dentro de tramos de tanque lleno a tanque lleno: '
+                                 'sobre esos km se calcula el índice. Pocos km = índice poco '
+                                 'fiable.'),
+        'Índice de rendimiento': ('100 = el camión rindió con él igual que su promedio (este '
+                                  'mes y los 3 anteriores). 120 = 20 % mejor; 80 = 20 % peor. '
+                                  'Bajo 85 sale en rojo. Vacío = no hay tramos para medir.'),
+    },
+    'Revisar': {
+        'Km': 'Km del tablero en ese momento.',
+        'Qué': ('Carga: carga muy seguida o varias el mismo día. Rendimiento bajo: tramo de '
+                'tanque lleno bajo el 85 % de los 5 anteriores. Km sin registrar: más de 20 km '
+                'sin salida. Salida sin cierre: nadie marcó el km de cierre.'),
+        'Detalle': ('Lo que se encontró. Conviene mirarlo con la foto del tablero: no siempre '
+                    'es un error.'),
+        'Grifo': 'Dónde se hizo la carga, como lo escribió el chofer.',
+    },
+    'Uso de flota': {
+        'Días hábiles': 'Lunes a viernes del mes (hasta hoy si es el mes en curso).',
+        'Con salida': 'Días hábiles en que el camión salió al menos una vez.',
+        'Sin salida': 'Días hábiles en que el camión no salió.',
+        '% de uso': 'Con salida ÷ días hábiles × 100.',
+        'Días de fin de semana': 'Sábados y domingos en que el camión salió.',
+        'Salidas': 'Salidas del mes (un día puede tener más de una).',
+        'Horas en ruta': 'Suma de horas entre la salida y el cierre (solo salidas cerradas).',
+        'Horas por salida': ('Horas en ruta ÷ salidas cerradas. Más de 12 h suele ser un '
+                             'cierre marcado al día siguiente.'),
+        'Km por día con salida': 'Km del mes ÷ días en que salió.',
+    },
+    'Salidas': {
+        'Responsable': 'Capataz o encargado a cargo del camión ese día.',
+        'Km recorridos': 'Km cierre − km salida.',
+        'Km sin registrar': 'Km entre el cierre anterior del camión y esta salida.',
+    },
+    'Combustible': {
+        'S/ por unidad': 'S/ ÷ cantidad: precio del galón (o L o m³).',
+        'Tanque lleno': ('Sí = llenaron el tanque. El rendimiento exacto se mide entre dos '
+                         'cargas de tanque lleno.'),
+    },
+}
+
+TENDENCIA = {
+    'Rendimiento (km por unidad de su combustible)': 'Km por galón (o L o m³) de cada mes.',
+    'S/ de combustible': 'Soles pagados en combustible cada mes.',
+    'Km recorridos': 'Km del mes (salidas + km sin registrar).',
+}
+
+
+# Ancho mínimo de una columna con explicación, para que la fila no quede muy alta.
+ANCHO_EXPLICADA = 16
+
+
+def fila_de_explicaciones(ws, encabezados, anchos):
+    """Escribe en la fila 4, debajo del encabezado, lo que significa cada
+    columna. Se ve en cualquier visor (las notas de Excel no salen en el
+    celular). Devuelve los anchos de columna (las explicadas, más anchas) o
+    None si la hoja no tiene explicaciones."""
+    import math
+
+    from openpyxl.styles import Alignment, Font, PatternFill
+    textos = EXPLICACIONES.get(ws.title)
+    if not textos:
+        return None
+    anchos = [max(a, ANCHO_EXPLICADA, len(t) + 3) if t in textos else a
+              for t, a in zip(encabezados, anchos)] + list(anchos[len(encabezados):])
+    amarillo = PatternFill('solid', fgColor='FFF2CC')
+    lineas = 1
+    for col, (titulo, ancho) in enumerate(zip(encabezados, anchos), 1):
+        texto = textos.get(titulo, '')
+        celda = ws.cell(row=4, column=col, value=texto or None)
+        celda.font = Font(italic=True, size=8, color='595959')
+        celda.fill = amarillo
+        celda.alignment = Alignment(wrap_text=True, vertical='top')
+        if texto:
+            lineas = max(lineas, math.ceil(len(texto) / (ancho * 1.5)))
+    ws.row_dimensions[4].height = min(11.5 * lineas + 4, 120)
+    return anchos
+
+
+def explicar_encabezados(wb):
+    """Pone una nota de Excel en cada encabezado que tiene explicación."""
+    from openpyxl.comments import Comment
+
+    def nota(celda, texto):
+        c = Comment(texto, 'TECSUR')
+        c.width = 300
+        c.height = 40 + 18 * (len(texto) // 45 + 1)
+        celda.comment = c
+
+    for nombre, textos in EXPLICACIONES.items():
+        if nombre not in wb.sheetnames:
+            continue
+        for celda in wb[nombre][3]:
+            if celda.value in textos:
+                nota(celda, textos[celda.value])
+    if 'Tendencia' in wb.sheetnames:
+        for (celda,) in wb['Tendencia'].iter_rows(min_col=1, max_col=1):
+            if celda.value in TENDENCIA:
+                nota(celda, TENDENCIA[celda.value])

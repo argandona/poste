@@ -462,11 +462,18 @@ def informe_excel(informe, contratista='', responsable=''):
         for celda in ws[3]:
             celda.font = Font(bold=True)
             celda.fill = gris
+        # Debajo del encabezado, lo que significa cada columna (visible: en el
+        # celular no se ven las notas de Excel).
+        from .camiones_analisis import fila_de_explicaciones
+        explicadas = fila_de_explicaciones(ws, encabezados, anchos)
+        inicio = 4 if explicadas is None else 5
+        anchos = explicadas or anchos
         for f in filas:
             ws.append(f)
         for i, ancho in enumerate(anchos, 1):
             ws.column_dimensions[get_column_letter(i)].width = ancho
-        ws.freeze_panes = 'A4'
+        ws.freeze_panes = f'A{inicio}'
+        return inicio
 
     def n(x):
         return float(x) if isinstance(x, Decimal) else x
@@ -474,7 +481,7 @@ def informe_excel(informe, contratista='', responsable=''):
     wb = Workbook()
     ws = wb.active
     ws.title = 'Resumen'
-    hoja(ws, ['Placa', 'Combustible', 'Responsables', 'Choferes', 'Días',
+    inicio = hoja(ws, ['Placa', 'Combustible', 'Responsables', 'Choferes', 'Días',
               'Salidas', 'Km del mes', 'Km SST', 'Km internos',
               'Km sin registrar', 'SST atendidas', 'Km por SST', 'Cantidad',
               'Unidad', 'S/ combustible', 'Rendimiento (km/unidad)', 'Método',
@@ -489,7 +496,7 @@ def informe_excel(informe, contratista='', responsable=''):
            c['sin_cierre'], 'SÍ' if c['alerta'] else '']
           for c in informe['camiones']],
          [11, 12, 24, 24, 7, 8, 11, 9, 11, 13, 12, 11, 10, 8, 14, 14, 12, 14, 11, 10, 10, 8])
-    for fila, c in zip(ws.iter_rows(min_row=4), informe['camiones']):
+    for fila, c in zip(ws.iter_rows(min_row=inicio), informe['camiones']):
         if c['alerta']:
             for celda in fila:
                 celda.fill = rojo
@@ -531,6 +538,9 @@ def informe_excel(informe, contratista='', responsable=''):
          [12, 7, 22, 11, 20, 16, 22, 20, 14, 40])
 
     hoja_smac(wb.create_sheet('F09-PA-SMAC-007'), informe, contratista, responsable)
+
+    from .camiones_analisis import explicar_encabezados
+    explicar_encabezados(wb)
 
     salida = io.BytesIO()
     wb.save(salida)
