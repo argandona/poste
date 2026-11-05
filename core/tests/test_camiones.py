@@ -298,6 +298,11 @@ class CamionesTests(BaseAPITestCase):
         uso = {f['Placa']: f for f in tabla('Uso de flota')}
         self.assertEqual(uso['ABC-123']['Salidas'], 2)
 
+        # Cada encabezado explicado lleva su nota de Excel.
+        notas = {c.value: c.comment for c in libro['Uso de flota'][3]}
+        self.assertIn('días hábiles × 100', notas['% de uso'].text)
+        self.assertIsNotNone({c.value: c.comment for c in libro['Resumen'][3]}['Km sin registrar'])
+
         ws = libro['Tendencia']
         self.assertEqual(ws['A6'].value, 'ABC-123')
         self.assertEqual(ws.cell(row=6, column=13).value, 20.0)

@@ -532,6 +532,9 @@ def informe_excel(informe, contratista='', responsable=''):
 
     hoja_smac(wb.create_sheet('F09-PA-SMAC-007'), informe, contratista, responsable)
 
+    from .camiones_analisis import explicar_encabezados
+    explicar_encabezados(wb)
+
     salida = io.BytesIO()
     wb.save(salida)
     return salida.getvalue()

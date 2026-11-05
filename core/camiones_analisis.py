@@ -473,3 +473,123 @@ def hojas_de_analisis(wb, informe, hoja, n, hoy=None):
         ch.width, ch.height = 22, 9
         ws.add_chart(ch, f'{get_column_letter(len(etiquetas) + 3)}{ancla}')
         ancla += 20
+
+
+# ── Notas de los encabezados ─────────────────────────────────────────────────
+# Pedido del usuario el 2026-11-05: que cada columna explique qué es. Van como
+# nota de Excel (el triangulito rojo; se lee al pasar el mouse).
+
+EXPLICACIONES = {
+    'Resumen': {
+        'Responsables': 'Capataz o encargado a cargo del camión en las salidas del mes.',
+        'Choferes': 'Quiénes manejaron el camión este mes.',
+        'Días': 'Días distintos en que el camión tuvo al menos una salida.',
+        'Salidas': 'Cuántas veces el chofer marcó km de salida en el mes.',
+        'Km del mes': 'Km de las salidas + km sin registrar.',
+        'Km SST': 'Km de las salidas que fueron a una o más SST.',
+        'Km internos': 'Km de las salidas de trabajo interno (sin SST).',
+        'Km sin registrar': ('Km entre el cierre de una salida y la salida siguiente: el camión '
+                             'se movió sin que nadie lo registre, o el km se marcó mal.'),
+        'SST atendidas': 'SST distintas a las que fue el camión en el mes.',
+        'Km por SST': 'Km SST ÷ SST atendidas.',
+        'Cantidad': 'Combustible cargado en el mes (gal, L o m³ según el camión).',
+        'S/ combustible': 'Soles pagados en combustible en el mes.',
+        'Rendimiento (km/unidad)': 'Km que hace el camión con un galón (o L o m³).',
+        'Método': ('«tanque lleno»: exacto, entre la primera y la última carga de tanque '
+                   'lleno del mes. «aproximado»: no hubo dos llenos; km del mes ÷ cantidad.'),
+        'Promedio 3 meses': 'Rendimiento de los 3 meses anteriores.',
+        'Variación %': 'Rendimiento del mes contra el promedio de 3 meses. Negativo = rinde menos.',
+        'S/ por km': 'S/ combustible ÷ km del mes: cuánto cuesta cada km.',
+        'Sin cierre': 'Salidas de días anteriores a las que nadie marcó el km de cierre.',
+        'Alerta': 'SÍ cuando rinde menos del 85 % de su promedio de 3 meses (fila en rojo).',
+    },
+    'Ranking': {
+        'Puesto': ('Lugar dentro de los camiones del mismo combustible. 1 = el que más km '
+                   'hace por galón.'),
+        'Rendimiento': 'Km por galón (o L o m³) en el mes.',
+        'vs. el mejor %': 'Cuánto menos rinde que el primero de su combustible.',
+        'Método': '«tanque lleno»: exacto. «aproximado»: km del mes ÷ cantidad cargada.',
+        'Km del mes': 'Km de las salidas + km sin registrar.',
+        'S/ combustible': 'Soles pagados en combustible en el mes.',
+        'S/ por km': 'S/ combustible ÷ km del mes. Este sí se compara entre todos.',
+        'Puesto S/ por km': 'Lugar entre todos los camiones. 1 = el más barato por km.',
+        'Comentario': 'Rinde más / Rinde menos dentro de su combustible (verde / rojo).',
+    },
+    'Choferes': {
+        'Salidas': 'Salidas que hizo el chofer en el mes.',
+        'Km manejados': 'Km de sus salidas (km cierre − km salida).',
+        'Camiones': 'Camiones que manejó en el mes.',
+        'Horas en ruta': 'Suma de horas entre la salida y el cierre (solo salidas cerradas).',
+        'Km por salida': 'Km manejados ÷ salidas.',
+        'Horas por salida': ('Horas en ruta ÷ salidas cerradas. Si es muy alto, el cierre se '
+                             'marcó al día siguiente.'),
+        'Cargas': 'Cargas de combustible que registró.',
+        'S/ cargado': 'Soles de las cargas que registró.',
+        'Salidas sin cierre': 'Salidas suyas de días anteriores que no cerró.',
+        'Km en tramos medidos': ('Km suyos dentro de tramos de tanque lleno a tanque lleno: '
+                                 'sobre esos km se calcula el índice. Pocos km = índice poco '
+                                 'fiable.'),
+        'Índice de rendimiento': ('100 = el camión rindió con él igual que su promedio (este '
+                                  'mes y los 3 anteriores). 120 = 20 % mejor; 80 = 20 % peor. '
+                                  'Bajo 85 sale en rojo. Vacío = no hay tramos para medir.'),
+    },
+    'Revisar': {
+        'Km': 'Km del tablero en ese momento.',
+        'Qué': ('Carga: carga muy seguida o varias el mismo día. Rendimiento bajo: tramo de '
+                'tanque lleno bajo el 85 % de los 5 anteriores. Km sin registrar: más de 20 km '
+                'sin salida. Salida sin cierre: nadie marcó el km de cierre.'),
+        'Detalle': ('Lo que se encontró. Conviene mirarlo con la foto del tablero: no siempre '
+                    'es un error.'),
+        'Grifo': 'Dónde se hizo la carga, como lo escribió el chofer.',
+    },
+    'Uso de flota': {
+        'Días hábiles': 'Lunes a viernes del mes (hasta hoy si es el mes en curso).',
+        'Con salida': 'Días hábiles en que el camión salió al menos una vez.',
+        'Sin salida': 'Días hábiles en que el camión no salió.',
+        '% de uso': 'Con salida ÷ días hábiles × 100.',
+        'Días de fin de semana': 'Sábados y domingos en que el camión salió.',
+        'Salidas': 'Salidas del mes (un día puede tener más de una).',
+        'Horas en ruta': 'Suma de horas entre la salida y el cierre (solo salidas cerradas).',
+        'Horas por salida': ('Horas en ruta ÷ salidas cerradas. Más de 12 h suele ser un '
+                             'cierre marcado al día siguiente.'),
+        'Km por día con salida': 'Km del mes ÷ días en que salió.',
+    },
+    'Salidas': {
+        'Responsable': 'Capataz o encargado a cargo del camión ese día.',
+        'Km recorridos': 'Km cierre − km salida.',
+        'Km sin registrar': 'Km entre el cierre anterior del camión y esta salida.',
+    },
+    'Combustible': {
+        'S/ por unidad': 'S/ ÷ cantidad: precio del galón (o L o m³).',
+        'Tanque lleno': ('Sí = llenaron el tanque. El rendimiento exacto se mide entre dos '
+                         'cargas de tanque lleno.'),
+    },
+}
+
+TENDENCIA = {
+    'Rendimiento (km por unidad de su combustible)': 'Km por galón (o L o m³) de cada mes.',
+    'S/ de combustible': 'Soles pagados en combustible cada mes.',
+    'Km recorridos': 'Km del mes (salidas + km sin registrar).',
+}
+
+
+def explicar_encabezados(wb):
+    """Pone una nota de Excel en cada encabezado que tiene explicación."""
+    from openpyxl.comments import Comment
+
+    def nota(celda, texto):
+        c = Comment(texto, 'TECSUR')
+        c.width = 300
+        c.height = 40 + 18 * (len(texto) // 45 + 1)
+        celda.comment = c
+
+    for nombre, textos in EXPLICACIONES.items():
+        if nombre not in wb.sheetnames:
+            continue
+        for celda in wb[nombre][3]:
+            if celda.value in textos:
+                nota(celda, textos[celda.value])
+    if 'Tendencia' in wb.sheetnames:
+        for (celda,) in wb['Tendencia'].iter_rows(min_col=1, max_col=1):
+            if celda.value in TENDENCIA:
+                nota(celda, TENDENCIA[celda.value])
