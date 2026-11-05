@@ -228,9 +228,8 @@ class CamionesTests(BaseAPITestCase):
                                              'formato': 'xlsx'})
         libro = openpyxl.load_workbook(io.BytesIO(r.content))
         self.assertEqual(libro.sheetnames, [
-            'Resumen', 'Ranking', 'Choferes', 'Grifos', 'Revisar', 'Costo por SST',
-            'Costo por distrito', 'Uso de flota', 'Tendencia', 'Salidas', 'Combustible',
-            'Eliminados', 'F09-PA-SMAC-007'])
+            'Resumen', 'Ranking', 'Choferes', 'Revisar', 'Uso de flota', 'Tendencia',
+            'Salidas', 'Combustible', 'Eliminados', 'F09-PA-SMAC-007'])
         self.assertEqual(libro['Resumen']['A4'].value, 'ABC-123')
         salidas = libro['Salidas']
         col = [c.value for c in salidas[3]].index('Distrito') + 1
@@ -290,21 +289,11 @@ class CamionesTests(BaseAPITestCase):
         self.assertEqual((choferes['Carlos Chofer']['Salidas'],
                           choferes['Carlos Chofer']['Km manejados']), (2, 800))
 
-        grifos = tabla('Grifos')
-        self.assertEqual([(f['Grifo'], f['S/ por unidad (promedio)'], f['S/ pagado de más'])
-                          for f in grifos], [('PRIMAX', 18.0, 0.0), ('REPSOL', 25.0, 70.0)])
-
         revisar = [(f['Placa'], f['Qué'], f['Detalle']) for f in tabla('Revisar')]
         self.assertIn(('ABC-123', 'Rendimiento bajo',
                        '10.0 km/gal entre el km 1500 y el 1600; su promedio es 25.0 (60 % menos)'),
                       revisar)
         self.assertTrue(any(q == 'Carga' and 'S/ 25.00 por gal' in d for _, q, d in revisar))
-
-        sst = {f['SST o trabajo']: f for f in tabla('Costo por SST')}
-        self.assertEqual((sst['SST-1']['Km'], sst['SST-1']['S/ estimado']), (600.0, 790.0))
-        self.assertEqual(sst['Trabajo interno: Almacén']['S/ estimado'], 360.0)
-        distritos = {f['Distrito']: f['S/ estimado'] for f in tabla('Costo por distrito')}
-        self.assertEqual(distritos, {'SURCO': 790.0, 'ATE': 360.0})
 
         uso = {f['Placa']: f for f in tabla('Uso de flota')}
         self.assertEqual(uso['ABC-123']['Salidas'], 2)

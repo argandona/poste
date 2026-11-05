@@ -1,12 +1,12 @@
 """Análisis del informe mensual de camiones, en hojas del Excel con su gráfico.
 
 Pedido del usuario el 2026-11-05: que el Excel muestre qué camión rinde más y
-cuál menos, quién maneja más económico, en qué grifo sale más barato, las
-cargas raras, cuánto cuesta llegar a cada SST y distrito, cuánto se usa cada
-camión y cómo viene el rendimiento en el año.
+cuál menos, quién maneja más económico, las cargas raras, cuánto se usa cada
+camión y cómo viene el rendimiento en el año. El mismo día pidió quitar las
+hojas de grifos y de costo por SST y por distrito.
 
-Todo sale de lo que el chofer ya registra (km, cargas, grifo, SST, distrito y
-horas de salida y cierre): no pide datos nuevos.
+Todo sale de lo que el chofer ya registra (km, cargas y horas de salida y
+cierre): no pide datos nuevos.
 """
 from collections import defaultdict
 from datetime import date, timedelta
@@ -180,45 +180,6 @@ def por_chofer(informe, hoy=None):
     return salida
 
 
-def por_grifo(informe):
-    """Precio promedio por grifo y combustible, y cuánto se pagó de más contra
-    el grifo más barato del mes para ese combustible."""
-    g = defaultdict(lambda: {'cargas': 0, 'cantidad': Decimal(0), 'monto': Decimal(0),
-                             'precios': [], 'camiones': set(), 'unidad': ''})
-    for c in informe['camiones']:
-        for k in c['cargas']:
-            f = g[(k['combustible'], _grifo(k['grifo']))]
-            f['cargas'] += 1
-            f['cantidad'] += k['cantidad']
-            f['monto'] += k['monto']
-            f['precios'].append(k['precio_unitario'])
-            f['camiones'].add(c['placa'])
-            f['unidad'] = k['unidad']
-    precio = {key: f['monto'] / f['cantidad'] for key, f in g.items() if f['cantidad']}
-    mas_barato = {}
-    for (comb, _), p in precio.items():
-        mas_barato[comb] = min(p, mas_barato.get(comb, p))
-    filas = []
-    for (comb, grifo), f in sorted(g.items(), key=lambda kv: (kv[0][0], precio.get(kv[0], 0))):
-        p = precio.get((comb, grifo))
-        minimo = mas_barato.get(comb)
-        filas.append({
-            'combustible': comb.upper(),
-            'grifo': grifo,
-            'cargas': f['cargas'],
-            'camiones': ', '.join(sorted(f['camiones'])),
-            'cantidad': f['cantidad'],
-            'unidad': f['unidad'],
-            'monto': f['monto'],
-            'precio': _r(p),
-            'precio_min': min(f['precios']),
-            'precio_max': max(f['precios']),
-            'vs_barato': _r((p / minimo - 1) * 100, 1) if p and minimo else None,
-            'de_mas': _r((p - minimo) * f['cantidad']) if p and minimo else None,
-        })
-    return filas
-
-
 def a_revisar(informe, hoy=None):
     """Lo raro del mes, para que alguien lo mire: no acusa a nadie.
 
@@ -292,62 +253,6 @@ def a_revisar(informe, hoy=None):
                               'Salida sin cierre', 'Nadie marcó el km de cierre', ''])
     filas.sort(key=lambda f: (f[1], f[2], f[0]))
     return filas
-
-
-def costos(informe):
-    """Lo que costó en combustible llegar a cada SST y a cada distrito.
-
-    S/ estimado = km de la salida × S/ por km del camión en el mes. Con varias
-    SST en una salida, los km y los soles se reparten en partes iguales. Sin
-    SST, va como trabajo interno con lo que escribió el chofer."""
-    por_sst, por_distrito = {}, {}
-    for c in informe['camiones']:
-        # Sin redondear, para que la suma de las SST dé los S/ del camión.
-        costo_km = c['monto'] / c['km_total'] if c['km_total'] and c['monto'] else None
-        for j in c['jornadas']:
-            partes = j['ssts'] or [None]
-            km = Decimal(j['km_recorridos']) / len(partes)
-            soles = km * costo_km if costo_km is not None else None
-            for s in partes:
-                if s:
-                    clave, actividad = s['sst'], s['actividad']
-                    distrito = s['distrito'] or j['distrito_interno']
-                else:
-                    clave = 'Trabajo interno: ' + (' '.join(j['trabajo_interno'].split()) or 'sin detalle')
-                    actividad, distrito = '', j['distrito_interno']
-                distrito = ' '.join((distrito or '').split()) or '(sin distrito)'
-                f = por_sst.setdefault(clave, {
-                    'sst': clave, 'interno': s is None, 'actividad': actividad,
-                    'distritos': set(), 'camiones': set(), 'salidas': set(),
-                    'km': Decimal(0), 'soles': Decimal(0), 'sin_costo': 0})
-                d = por_distrito.setdefault(distrito.upper(), {
-                    'distrito': distrito.upper(), 'ssts': set(), 'salidas': set(),
-                    'km': Decimal(0), 'soles': Decimal(0), 'sin_costo': 0})
-                for x in (f, d):
-                    x['salidas'].add(j['id_jornada'])
-                    x['km'] += km
-                    if soles is None:
-                        x['sin_costo'] += 1
-                    else:
-                        x['soles'] += soles
-                f['distritos'].add(distrito)
-                f['camiones'].add(c['placa'])
-                if s:
-                    d['ssts'].add(clave)
-
-    def fin(lista):
-        return sorted(lista, key=lambda x: (-x['soles'], -x['km']))
-
-    ssts = [{**f, 'distritos': ', '.join(sorted(f['distritos'])),
-             'camiones': ', '.join(sorted(f['camiones'])), 'salidas': len(f['salidas']),
-             'km': round(f['km'], 1), 'soles': round(f['soles'], 2)}
-            for f in por_sst.values()]
-    distritos = [{**d, 'ssts': len(d['ssts']), 'salidas': len(d['salidas']),
-                  'km': round(d['km'], 1), 'soles': round(d['soles'], 2),
-                  'soles_por_salida': (round(d['soles'] / len(d['salidas']), 2)
-                                       if d['salidas'] else None)}
-                 for d in por_distrito.values()]
-    return fin(ssts), fin(distritos)
 
 
 def uso_flota(informe, hoy=None):
@@ -512,26 +417,6 @@ def hojas_de_analisis(wb, informe, hoja, n, hoy=None):
         _grafico_barras(ws, 'Índice de rendimiento por chofer (100 = normal)', 1, 12,
                         medidos[0], medidos[-1], 'N3')
 
-    # Grifos
-    ws = wb.create_sheet('Grifos')
-    filas = por_grifo(informe)
-    hoja(ws, ['Combustible', 'Grifo', 'Cargas', 'Camiones', 'Cantidad', 'Unidad', 'S/',
-              'S/ por unidad (promedio)', 'Más barato', 'Más caro', 'vs. el más barato %',
-              'S/ pagado de más'],
-         [[f['combustible'], f['grifo'], f['cargas'], f['camiones'], n(f['cantidad']),
-           f['unidad'], n(f['monto']), n(f['precio']), n(f['precio_min']),
-           n(f['precio_max']), n(f['vs_barato']), n(f['de_mas'])] for f in filas],
-         [12, 26, 8, 22, 10, 8, 11, 22, 11, 10, 18, 16])
-    _nota(ws, 'S/ pagado de más = lo cargado en ese grifo × la diferencia contra el grifo '
-              'más barato del mes para el mismo combustible.')
-    fila_graf = 3
-    for comb in dict.fromkeys(f['combustible'] for f in filas):
-        grupo = [i for i, f in enumerate(filas, 4) if f['combustible'] == comb]
-        unidad = filas[grupo[0] - 4]['unidad']
-        alto = _grafico_barras(ws, f'S/ por {unidad} de {comb} por grifo', 2, 8,
-                               grupo[0], grupo[-1], f'N{fila_graf}')
-        fila_graf += int(alto * 2) + 2
-
     # Revisar
     ws = wb.create_sheet('Revisar')
     filas = a_revisar(informe, hoy=hoy)
@@ -541,32 +426,6 @@ def hojas_de_analisis(wb, informe, hoja, n, hoy=None):
               'error.' if filas else 'Nada raro este mes.')
     for i in range(4, 4 + len(filas)):
         ws.cell(row=i, column=2).number_format = 'DD/MM/YYYY'
-
-    # Costo por SST y por distrito
-    ssts, distritos = costos(informe)
-    ws = wb.create_sheet('Costo por SST')
-    hoja(ws, ['SST o trabajo', 'Actividad', 'Distrito', 'Camiones', 'Salidas', 'Km',
-              'S/ estimado'],
-         [[f['sst'], f['actividad'], f['distritos'], f['camiones'], f['salidas'],
-           n(f['km']), n(f['soles'])] for f in ssts],
-         [40, 34, 20, 22, 8, 10, 12])
-    _nota(ws, 'S/ estimado = km de la salida × S/ por km del camión en el mes. Con varias '
-              'SST en una salida se reparte en partes iguales.')
-    for i, f in enumerate(ssts, 4):
-        if f['interno']:
-            ws.cell(row=i, column=1).font = Font(italic=True)
-    top = min(len(ssts), 15)
-    if top:
-        _grafico_barras(ws, f'Las {top} que más costaron (S/)', 1, 7, 4, 3 + top, 'I3')
-
-    ws = wb.create_sheet('Costo por distrito')
-    hoja(ws, ['Distrito', 'SST', 'Salidas', 'Km', 'S/ estimado', 'S/ por salida'],
-         [[d['distrito'], d['ssts'], d['salidas'], n(d['km']), n(d['soles']),
-           n(d['soles_por_salida'])] for d in distritos],
-         [24, 8, 8, 10, 12, 13])
-    _nota(ws, 'Mismo cálculo que Costo por SST, sumado por distrito.')
-    if distritos:
-        _grafico_barras(ws, 'S/ estimado por distrito', 1, 5, 4, 3 + min(len(distritos), 20), 'H3')
 
     # Uso de la flota
     ws = wb.create_sheet('Uso de flota')
