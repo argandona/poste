@@ -462,12 +462,7 @@ def informe_excel(informe, contratista='', responsable=''):
         for celda in ws[3]:
             celda.font = Font(bold=True)
             celda.fill = gris
-        # Debajo del encabezado, lo que significa cada columna (visible: en el
-        # celular no se ven las notas de Excel).
-        from .camiones_analisis import fila_de_explicaciones
-        explicadas = fila_de_explicaciones(ws, encabezados, anchos)
-        inicio = 4 if explicadas is None else 5
-        anchos = explicadas or anchos
+        inicio = 4
         for f in filas:
             ws.append(f)
         for i, ancho in enumerate(anchos, 1):
