@@ -52,7 +52,7 @@ VEREDAS = (('vereda_10', 10), ('vereda_15', 15), ('vereda_20', 20))
 RENGLONES_VEREDA = 3
 RENGLONES_PISO = 2
 
-LOGO = Path(__file__).resolve().parent / 'data' / 'logo_encossa.png'
+LOGO = Path(__file__).resolve().parent / 'data' / 'logo_encossa_sin_leyenda.png'
 
 
 @dataclass
