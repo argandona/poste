@@ -473,7 +473,7 @@ def _veredas(d, lineas):
 
 
 # ── PDF ──────────────────────────────────────────────────────────────────────
-_LOGO = Path(__file__).resolve().parent / 'data' / 'logo_encossa.png'
+_LOGO = Path(__file__).resolve().parent / 'data' / 'logo_encossa_sin_leyenda.png'
 _ROJO = colors.HexColor('#C0392B')
 
 # La cuadrícula del formato: 31 columnas, casi cuadradas.
@@ -488,8 +488,8 @@ _MARGEN = 5
 def _encabezado(c, datos, pagina, paginas):
     ancho, alto = A4
     if _LOGO.exists():
-        c.drawImage(ImageReader(str(_LOGO)), 45, alto - 92, width=150,
-                    height=48.6, mask='auto')
+        c.drawImage(ImageReader(str(_LOGO)), 45, alto - 87, width=150,
+                    height=43.6, mask='auto')
     c.setFont('Helvetica-Bold', 15)
     c.drawCentredString(ancho / 2 + 10, alto - 70, 'CUADERNO DE OBRA')
     c.setFont('Helvetica', 14)
